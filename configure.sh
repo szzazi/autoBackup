@@ -103,6 +103,53 @@ test_samba_connection() {
     rmdir "$TMP_MOUNT"
 }
 
+create_source_and_exclude_lists() {
+    echo ""
+    echo "Creating sourceList.txt and excludeList.txt from .example files..."
+
+    local src_dir="${config_values[PROGRAM_DIR]}"
+    [ -z "$src_dir" ] && src_dir="$(pwd)"
+
+    local source_example="$src_dir/sourceList.txt.example"
+    local exclude_example="$src_dir/excludeList.txt.example"
+    local source_file="$src_dir/sourceList.txt"
+    local exclude_file="$src_dir/excludeList.txt"
+
+    # Detect available editor
+    local editor=""
+    for e in nano vim vi; do
+        if command -v "$e" >/dev/null 2>&1; then
+            editor="$e"
+            break
+        fi
+    done
+    [ -z "$editor" ] && editor="less"
+
+    if [ -f "$source_example" ] && [ ! -f "$source_file" ]; then
+        cp "$source_example" "$source_file"
+        echo "✔ $source_file created from example"
+        echo "📂 Contains default configuration folders to back up (e.g. /etc, ~/.config)"
+        echo "✏️ Opening $source_file for editing..."
+        "$editor" "$source_file"
+    elif [ -f "$source_file" ]; then
+        echo "ℹ $source_file already exists, not overwritten"
+    else
+        echo "⚠ $source_example not found"
+    fi
+
+    if [ -f "$exclude_example" ] && [ ! -f "$exclude_file" ]; then
+        cp "$exclude_example" "$exclude_file"
+        echo "✔ $exclude_file created from example"
+        echo "📂 Contains exclude rules (e.g. *.tmp, .cache/)"
+        echo "✏️ Opening $exclude_file for editing..."
+        "$editor" "$exclude_file"
+    elif [ -f "$exclude_file" ]; then
+        echo "ℹ $exclude_file already exists, not overwritten"
+    else
+        echo "⚠ $exclude_example not found"
+    fi
+}
+
 confirm() {
     read -rp "Do you want to continue (y/n)? " answer
     [[ "$answer" =~ ^[Yy]$ ]]
@@ -169,9 +216,9 @@ check_dependencies
 prompt_user_input
 write_config
 test_samba_connection
+create_source_and_exclude_lists
 setup_cron_job
 
 echo ""
 echo "✅ Installation complete. You can now run: ./autoBackup.sh"
-
 echo "To configure the script, edit $CONFIG_FILE or run the installer again."
