@@ -1,0 +1,13 @@
+- *.log
+- *.pem
+- *.key
+- */.*
+- www/nextcloud/*
+- etc/letsencrypt/*
+- autoBackup/remote/*
+- autoBackup/remote/*.zip
+- autoBackup/temp/*
+- *ssl*.o
+- /usr/local/bin/autoBackup/remote/*
+- /usr/local/bin/autoBackup/remote*
+- /etc/alternatives/*

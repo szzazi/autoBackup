@@ -1,0 +1,4 @@
+/var/www
+/etc
+/home/pi
+/usr/local/bin/*

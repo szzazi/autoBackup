@@ -1,0 +1,67 @@
+############################################
+# Configuration for autoBackup.sh
+# Place this file next to autoBackup.sh or
+# specify it with --config /path/to/config.conf
+############################################
+
+##########################
+# === PROGRAM SETTINGS ===
+##########################
+
+# Main directory of the backup script.
+# This should contain sourceList.txt, excludeList.txt, etc.
+# Usually the same directory as autoBackup.sh
+PROGRAM_DIR="/usr/local/bin/autoBackup"
+
+# Path to file containing list of source directories to back up.
+# Each line should be an absolute path.
+# Example contents:
+# /home/user/Documents
+# /etc
+SOURCE_DIRS_LIST="$PROGRAM_DIR/sourceList.txt"
+
+# Path to file containing exclude rules for rsync.
+# Each line can be a file pattern or directory name to ignore.
+# Example contents:
+# *.tmp
+# node_modules/
+EXCLUDE_LIST="$PROGRAM_DIR/excludeList.txt"
+
+###########################
+# === SAMBA/CIFS SETTINGS ===
+###########################
+
+# IP address or hostname of the Samba server.
+# This is where the backup will be mounted and copied to.
+# Example: 192.168.1.10 or backups.local
+SAMBA_SERVER="192.168.1.10"
+
+# Shared folder on the Samba server to mount.
+# Must match a configured share name on the server.
+# Example: "/backupTarget" maps to //[server]/backupTarget
+SAMBA_FOLDER="/backupTarget"
+
+# Samba protocol version.
+# Examples: 1.0 (old), 2.0, 3.0 (recommended if supported by server)
+SAMBA_VERSION="1.0"
+
+# === Optional: credentials (can be overridden by CLI) ===
+
+# Samba username to access the shared folder.
+# You can override this with: --user <username>
+SAMBA_USERNAME="backupuser"
+
+# Samba password associated with the above username.
+# You can override this with: --pass <password>
+SAMBA_PASSWORD="yourStrongPassword"
+
+###########################
+# Notes:
+# - Do not enclose values in quotes unless necessary (as above).
+# - Avoid trailing slashes in SAMBA_FOLDER.
+# - Do NOT use credentials file (this config works without it).
+# - Any CLI parameter (user/pass/config) overrides these.
+#
+# Example usage overriding username & password:
+# ./autoBackup.sh --user newuser --pass newpassword
+###########################
