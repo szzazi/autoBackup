@@ -108,6 +108,49 @@ confirm() {
     [[ "$answer" =~ ^[Yy]$ ]]
 }
 
+setup_cron_job() {
+    echo ""
+    echo "Would you like to schedule automatic backups via cron?"
+
+    read -rp "Schedule auto-backup in crontab? (y/n): " answer
+    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+        echo "⏩ Skipping cron setup."
+        return
+    fi
+
+    echo ""
+    echo "Choose schedule:"
+    echo "1) Every day at 01:06"
+    echo "2) Every 3rd day at 01:06 (default)"
+    echo "3) Every week (Sunday) at 01:06"
+    echo "4) Custom cron expression"
+
+    read -rp "Select option [1-4]: " choice
+
+    case $choice in
+        1) cron_expr="06 01 * * *" ;;
+        2|"") cron_expr="06 01 */3 * *" ;;
+        3) cron_expr="06 01 * * 0" ;;
+        4) read -rp "Enter custom cron expression (5 fields): " cron_expr ;;
+        *) echo "Invalid option. Skipping."; return ;;
+    esac
+
+    script_path="$SCRIPT_DIR/autoBackup.sh"
+    log_path="/var/log/autoBackup.log"
+    cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
+
+    current_cron=$(crontab -l 2>/dev/null)
+
+    if echo "$current_cron" | grep -qF "$script_path"; then
+        echo "ℹ Cron job already exists for this script. Skipping."
+    else
+        (echo "$current_cron"; echo "$cron_cmd") | crontab -
+        echo "✅ Cron job added:"
+        echo "$cron_cmd"
+    fi
+}
+
+
 # === MAIN ===
 
 echo "Welcome to autoBackup installer"
@@ -126,6 +169,7 @@ check_dependencies
 prompt_user_input
 write_config
 test_samba_connection
+setup_cron_job
 
 echo ""
 echo "✅ Installation complete. You can now run: ./autoBackup.sh"
