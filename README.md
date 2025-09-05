@@ -36,12 +36,12 @@ autoBackup/
 To install everything into `/usr/local/bin/autoBackup`, run:
 
 ```bash
-sudo rm -rf /usr/local/bin/autoBackup
-sudo mkdir -p /usr/local/bin/autoBackup
-sudo git clone https://github.com/szzazi/autoBackup.git /usr/local/bin/autoBackup
+rm -rf /usr/local/bin/autoBackup
+mkdir -p /usr/local/bin/autoBackup
+git clone git@github.com:szzazi/autoBackup.git /usr/local/bin/autoBackup
 cd /usr/local/bin/autoBackup
-sudo chmod +x configure.sh autoBackup.sh
-sudo ./configure.sh
+chmod +x configure.sh autoBackup.sh
+./configure.sh
 ```
 
 > This will clone the full repository and launch the interactive installer.
