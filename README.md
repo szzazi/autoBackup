@@ -169,6 +169,18 @@ Run in test mode:
 ./startBackup.sh --dry-run
 ```
 
+Run only a Samba/CIFS connection test:
+
+```bash
+./startBackup.sh --test-samba
+```
+
+This will:
+- Mount the configured Samba/CIFS network share
+- Immediately unmount it
+- Print connection test results
+- Exit without performing any backup or file operations
+
 ---
 
 ## 📜 License
