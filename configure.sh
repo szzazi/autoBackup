@@ -182,7 +182,7 @@ setup_cron_job() {
         *) echo "Invalid option. Skipping."; return ;;
     esac
 
-    script_path="$SCRIPT_DIR/autoBackup.sh"
+    script_path="$SCRIPT_DIR/startBackup.sh"
     log_path="/var/log/autoBackup.log"
     cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
 
@@ -200,7 +200,7 @@ setup_cron_job() {
 
 # === MAIN ===
 
-echo "Welcome to autoBackup installer"
+echo "Welcome to Auto Backup installer"
 
 if [ -f "$CONFIG_FILE" ]; then
     echo "Config file already exists at $CONFIG_FILE."
@@ -220,5 +220,5 @@ create_source_and_exclude_lists
 setup_cron_job
 
 echo ""
-echo "✅ Installation complete. You can now run: ./autoBackup.sh"
+echo "✅ Installation complete. You can now run: ./startBackup.sh"
 echo "To configure the script, edit $CONFIG_FILE or run the installer again."
