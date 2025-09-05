@@ -86,7 +86,23 @@
         MYSQL_PORT="${MYSQL_PORT:-3306}"
         MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
     }
+    check_mysql_privileges() {
+        echo "Checking MySQL user privileges for export..."
+        PRIVS=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -e "SHOW GRANTS FOR CURRENT_USER();" 2>/dev/null)
+        for priv in SELECT "SHOW VIEW" EVENT "LOCK TABLES"; do
+            if echo "$PRIVS" | grep -iq "$priv"; then
+                echo "  ✅ $priv privilege: OK"
+            else
+                echo "  ❌ $priv privilege: MISSING"
+            fi
+        done
+    }
+
     dump_mysql_databases() {
+        if $DRY_RUN; then
+            check_mysql_privileges
+            return
+        fi
         echo "Dumping MySQL databases..."
         MYSQL_DUMP_DIR="$DESTINATION_DIR/mysql_dump"
         mkdir -p "$MYSQL_DUMP_DIR"

@@ -157,6 +157,15 @@ MYSQL_PORT="3306"                    # MySQL port
 MYSQL_EXCLUDE_DBS="mysql phpmyadmin" # Excluded databases
 ```
 
+**Required MySQL privileges for export:**
+
+- `SELECT` (read table data)
+- `SHOW VIEW` (read views)
+- `EVENT` (read events)
+- `LOCK TABLES` (for consistent dumps)
+
+In dry-run mode, the script will check if the configured MySQL user has these privileges and report any missing rights before attempting a real backup.
+
 If you set `MYSQL_BACKUP_ENABLED="false"`, no database backup will be performed.
 
 ---
