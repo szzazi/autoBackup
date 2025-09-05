@@ -20,7 +20,7 @@ A lightweight, configurable Bash script to automatically back up system and user
 
 ```
 autoBackup/
-├── autoBackup.sh         # Main script
+├── startBackup.sh         # Main script
 ├── install.sh            # Interactive installer
 ├── config.conf.example   # Editable config template
 ├── config.conf           # Auto-generated config (after install)
@@ -96,7 +96,7 @@ SAMBA_PASSWORD="mypassword"
 You can test the backup process without writing any files:
 
 ```bash
-./autoBackup.sh --dry-run
+./startBackup.sh --dry-run
 ```
 
 This will:
@@ -111,7 +111,7 @@ This will:
 The installer can add a `cron` job like:
 
 ```
-06 01 */3 * * /usr/local/bin/autoBackup/autoBackup.sh >>/var/log/autoBackup.log 2>&1
+06 01 */3 * * /usr/local/bin/autoBackup/startBackup.sh >>/var/log/autoBackup.log 2>&1
 ```
 
 You can view your current crontab with:
@@ -154,19 +154,19 @@ And these are excluded (`excludeList.txt`):
 Run a real backup:
 
 ```bash
-./autoBackup.sh
+./startBackup.sh
 ```
 
 Run with custom credentials:
 
 ```bash
-./autoBackup.sh --user yourUser --pass yourSecretPass
+./startBackup.sh --user yourUser --pass yourSecretPass
 ```
 
 Run in test mode:
 
 ```bash
-./autoBackup.sh --dry-run
+./startBackup.sh --dry-run
 ```
 
 ---

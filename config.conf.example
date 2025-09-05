@@ -1,6 +1,6 @@
 ############################################
-# Configuration for autoBackup.sh
-# Place this file next to autoBackup.sh or
+# Configuration for Auto Backup
+# Place this file next to startBackup.sh or
 # specify it with --config /path/to/config.conf
 ############################################
 
@@ -10,7 +10,7 @@
 
 # Main directory of the backup script.
 # This should contain sourceList.txt, excludeList.txt, etc.
-# Usually the same directory as autoBackup.sh
+# Usually the same directory as startBackup.sh
 PROGRAM_DIR="/usr/local/bin/autoBackup"
 
 # Path to file containing list of source directories to back up.
@@ -63,5 +63,5 @@ SAMBA_PASSWORD="yourStrongPassword"
 # - Any CLI parameter (user/pass/config) overrides these.
 #
 # Example usage overriding username & password:
-# ./autoBackup.sh --user newuser --pass newpassword
+# ./startBackup.sh --user newuser --pass newpassword
 ###########################
