@@ -139,6 +139,28 @@ And these are excluded (`excludeList.txt`):
 
 ---
 
+## 🗄️ Optional MySQL Database Backup
+
+- The script can optionally back up MySQL databases and include them in the zip archive.
+- The configurator (`configure.sh`) will prompt you to enable/disable MySQL backup and set all required parameters.
+- Each table's data is exported to a separate file; schema and meta info are exported to one file per database.
+- You can exclude system or unwanted databases (default: `mysql phpmyadmin`).
+- All MySQL backup settings are stored in `config.conf` and can be edited manually.
+
+### Example MySQL config section:
+```bash
+MYSQL_BACKUP_ENABLED="true"          # Enable/disable MySQL backup
+MYSQL_USERNAME="backupuser"          # MySQL user
+MYSQL_PASSWORD="yourStrongPassword"  # MySQL password
+MYSQL_HOST="localhost"               # MySQL host
+MYSQL_PORT="3306"                    # MySQL port
+MYSQL_EXCLUDE_DBS="mysql phpmyadmin" # Excluded databases
+```
+
+If you set `MYSQL_BACKUP_ENABLED="false"`, no database backup will be performed.
+
+---
+
 ## 🆘 Troubleshooting
 
 - ✅ Make sure `rsync`, `zip`, and `cifs-utils` are installed.
