@@ -40,7 +40,7 @@ rm -rf /usr/local/bin/autoBackup
 mkdir -p /usr/local/bin/autoBackup
 git clone git@github.com:szzazi/autoBackup.git /usr/local/bin/autoBackup
 cd /usr/local/bin/autoBackup
-chmod +x configure.sh autoBackup.sh
+chmod +x configure.sh startBackup.sh
 ./configure.sh
 ```
 
