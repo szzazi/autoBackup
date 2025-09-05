@@ -205,6 +205,23 @@ echo "Welcome to Auto Backup installer"
 if [ -f "$CONFIG_FILE" ]; then
     echo "Config file already exists at $CONFIG_FILE."
     if confirm; then
+            # === MySQL Backup Settings ===
+            read -rp "Enable MySQL database backup? (true/false) [true]: " val
+            config_values[MYSQL_BACKUP_ENABLED]="${val:-true}"
+
+            if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
+                read -rp "MySQL username for backup: " val
+                config_values[MYSQL_USERNAME]="$val"
+                read -rsp "MySQL password for backup: " val
+                echo ""
+                config_values[MYSQL_PASSWORD]="$val"
+                read -rp "MySQL host (default: localhost): " val
+                config_values[MYSQL_HOST]="${val:-localhost}"
+                read -rp "MySQL port (default: 3306): " val
+                config_values[MYSQL_PORT]="${val:-3306}"
+                read -rp "Excluded databases (space-separated, default: mysql phpmyadmin): " val
+                config_values[MYSQL_EXCLUDE_DBS]="${val:-mysql phpmyadmin}"
+            fi
         echo "Reconfiguring..."
     else
         echo "Installation cancelled."

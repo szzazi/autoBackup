@@ -70,6 +70,43 @@
             exit 1
         fi
         source "$CONFIG_FILE"
+
+        # Set MySQL defaults if not present
+        MYSQL_BACKUP_ENABLED="${MYSQL_BACKUP_ENABLED:-false}"
+        MYSQL_USERNAME="${MYSQL_USERNAME:-}" # must be set in config
+        MYSQL_PASSWORD="${MYSQL_PASSWORD:-}" # must be set in config
+        MYSQL_HOST="${MYSQL_HOST:-localhost}"
+        MYSQL_PORT="${MYSQL_PORT:-3306}"
+        MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
+
+        # Set MySQL defaults if not present
+        MYSQL_USERNAME="${MYSQL_USERNAME:-}" # must be set in config
+        MYSQL_PASSWORD="${MYSQL_PASSWORD:-}" # must be set in config
+        MYSQL_HOST="${MYSQL_HOST:-localhost}"
+        MYSQL_PORT="${MYSQL_PORT:-3306}"
+        MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
+    }
+    dump_mysql_databases() {
+        echo "Dumping MySQL databases..."
+        MYSQL_DUMP_DIR="$DESTINATION_DIR/mysql_dump"
+        mkdir -p "$MYSQL_DUMP_DIR"
+
+        # Get database list, excluding system DBs
+        DBS=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -e "SHOW DATABASES;" | grep -vE "Database|$(echo $MYSQL_EXCLUDE_DBS | sed 's/ /|/g')")
+
+        for db in $DBS; do
+            echo "  Exporting database: $db"
+            DB_DIR="$MYSQL_DUMP_DIR/$db"
+            mkdir -p "$DB_DIR"
+            # Dump schema and meta
+            mysqldump -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" --no-data --routines --events "$db" > "$DB_DIR/schema.sql"
+            # Dump each table's data separately
+            TABLES=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -D "$db" -e "SHOW TABLES;" | awk 'NR>1')
+            for tbl in $TABLES; do
+                echo "    Table: $tbl"
+                mysqldump -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" --no-create-info "$db" "$tbl" > "$DB_DIR/${tbl}.data.sql"
+            done
+        done
     }
 
     resolve_credentials() {
@@ -199,6 +236,9 @@
     print_start_info
     change_to_program_dir
     copy_source_dirs
+    if [ "$MYSQL_BACKUP_ENABLED" = "true" ]; then
+        dump_mysql_databases
+    fi
     generate_backup_filename
     compress_backup
     mount_remote_storage
