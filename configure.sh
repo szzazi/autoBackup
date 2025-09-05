@@ -21,8 +21,8 @@ check_dependencies() {
 
     if (( ${#missing[@]} > 0 )); then
         echo "Installing missing packages: ${missing[*]}"
-        sudo apt-get update
-        sudo apt-get install -y "${missing[@]}"
+        apt-get update
+        apt-get install -y "${missing[@]}"
     else
         echo "All required packages are installed."
     fi
@@ -90,12 +90,12 @@ test_samba_connection() {
     TMP_MOUNT="./__smbtest__"
     mkdir -p "$TMP_MOUNT"
 
-    sudo mount -t cifs -o rw,vers="${config_values[SAMBA_VERSION]}",username="${config_values[SAMBA_USERNAME]}",password="${config_values[SAMBA_PASSWORD]}" \
+    mount -t cifs -o rw,vers="${config_values[SAMBA_VERSION]}",username="${config_values[SAMBA_USERNAME]}",password="${config_values[SAMBA_PASSWORD]}" \
         "//${config_values[SAMBA_SERVER]}${config_values[SAMBA_FOLDER]}" "$TMP_MOUNT" >/dev/null 2>&1
 
     if mountpoint -q "$TMP_MOUNT"; then
         echo "✅ Successfully connected to Samba share."
-        sudo umount "$TMP_MOUNT"
+        umount "$TMP_MOUNT"
     else
         echo "❌ Failed to connect to Samba share. Check credentials or server access."
     fi
