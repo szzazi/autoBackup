@@ -73,7 +73,7 @@ The installer will:
 All settings are stored in `config.conf`. You can edit it manually or re-run:
 
 ```bash
-./install.sh
+./configure.sh
 ```
 
 ### Example config (simplified):
