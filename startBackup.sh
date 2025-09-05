@@ -119,7 +119,7 @@
             zip -r "$BACKUP_FILENAME" --filesync -q /dev/null
         else
             echo "Compressing backup to: $BACKUP_FILENAME"
-            zip -r "$BACKUP_FILENAME" "$DESTINATION_DIR"
+            (cd "$DESTINATION_DIR" && zip -r "../$BACKUP_FILENAME" .)
         fi
     }
 
