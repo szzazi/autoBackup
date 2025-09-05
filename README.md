@@ -217,3 +217,6 @@ This will:
 ## 📜 License
 
 MIT License. Use at your own risk. Contributions welcome!
+
+## TODO
+- Add automatic mail sending with the backup result.
