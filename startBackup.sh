@@ -93,13 +93,6 @@
         MYSQL_PORT="${MYSQL_PORT:-3306}"
         MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
 
-        # Set MySQL defaults if not present
-        MYSQL_USERNAME="${MYSQL_USERNAME:-}" # must be set in config
-        MYSQL_PASSWORD="${MYSQL_PASSWORD:-}" # must be set in config
-        MYSQL_HOST="${MYSQL_HOST:-localhost}"
-        MYSQL_PORT="${MYSQL_PORT:-3306}"
-        MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
-
         # Sync-only default from config
         SYNC_ONLY_DEFAULT="${SYNC_ONLY_DEFAULT:-false}"
     }
