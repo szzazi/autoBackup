@@ -212,6 +212,19 @@ This will:
 - Print connection test results
 - Exit without performing any backup or file operations
 
+Run only a sync to remote (no zip):
+
+```bash
+./startBackup.sh --sync-only /path/to/local/folder
+```
+
+This will:
+- Mount the configured Samba/CIFS network share
+- Rsync the contents of the specified local folder to the remote mount (preserving hierarchy)
+- Unmount the share and exit
+
+Use `--dry-run` together with `--sync-only` to simulate the rsync operation.
+
 ---
 
 ## 📜 License

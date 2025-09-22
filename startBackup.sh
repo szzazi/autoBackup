@@ -16,6 +16,8 @@
     CLI_PASSWORD=""
     DRY_RUN=false
     TEST_SAMBA=false
+    SYNC_ONLY=false
+    SYNC_PATH=""
 
     print_help() {
         echo "Usage: $0 [--config <path>] [--user <username>] [--pass <password>] [--dry-run] [--help]"
@@ -26,6 +28,7 @@
         echo "      --pass <password>   Samba password (overrides config)"
         echo "      --dry-run           Run full flow in simulation mode (no actual copy)"
         echo "      --test-samba        Only test Samba/CIFS connection (mount & unmount)"
+        echo "      --sync-only <path>   Sync the specified local folder to the remote share (no zip)."
         echo "  -h, --help              Show this help message"
         exit 0
     }
@@ -52,6 +55,11 @@
                 --test-samba)
                     TEST_SAMBA=true
                     shift
+                    ;;
+                --sync-only)
+                    SYNC_ONLY=true
+                    SYNC_PATH="$2"
+                    shift 2
                     ;;
                 -h|--help)
                     print_help
@@ -151,6 +159,32 @@
     change_to_program_dir() {
         cd "$PROGRAM_DIR" || { echo "Cannot change directory to $PROGRAM_DIR"; exit 1; }
     }
+
+sync_specified_folder() {
+    if [[ -z "$SYNC_PATH" ]]; then
+        echo "Error: --sync-only requires a local path argument."
+        exit 1
+    fi
+
+    if [ ! -d "$SYNC_PATH" ]; then
+        echo "Error: specified sync path does not exist: $SYNC_PATH"
+        exit 1
+    fi
+
+    echo "Syncing $SYNC_PATH to remote share ${SAMBA_SERVER}:${SAMBA_FOLDER}..."
+    mount_remote_storage
+
+    # Use rsync to copy the folder contents to the mounted remote; preserve hierarchy
+    if $DRY_RUN; then
+        echo "DRY RUN: rsync -avhn --delete \"$SYNC_PATH/\" \"$LOCAL_MOUNT_POINT/\""
+        rsync -avhn --delete "$SYNC_PATH/" "$LOCAL_MOUNT_POINT/"
+    else
+        rsync -avh --delete "$SYNC_PATH/" "$LOCAL_MOUNT_POINT/"
+    fi
+
+    unmount_remote_storage
+    echo "Sync completed."
+}
 
     copy_source_dirs() {
         echo "Copying source directories..."
