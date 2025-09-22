@@ -12,19 +12,53 @@ declare -A config_values
 load_existing_config() {
     if [ -f "$CONFIG_FILE" ]; then
         while IFS= read -r line; do
-    # Use readline editable input with prefilled default when available
+            if [[ "$line" =~ ^([A-Za-z0-9_]+)="?(.*)"?$ ]]; then
+                key="${BASH_REMATCH[1]}"
+                value="${BASH_REMATCH[2]}"
+                config_values[$key]="$value"
+            fi
+        done < "$CONFIG_FILE"
+    fi
+}
+
+check_dependencies() {
+    echo "Checking required packages..."
+
+    missing=()
+    for pkg in rsync zip cifs-utils; do
+        if ! command -v "$pkg" >/dev/null 2>&1; then
+            missing+=("$pkg")
+        fi
+    done
+
+    if (( ${#missing[@]} > 0 )); then
+        echo "Installing missing packages: ${missing[*]}"
+        apt-get update
+        apt-get install -y "${missing[@]}"
+    else
+        echo "All required packages are installed."
+    fi
+}
+
+prompt_user_input() {
+    echo ""
+    echo "=== Configuration ==="
+
+    # PROGRAM_DIR
     default_program_dir="${config_values[PROGRAM_DIR]:-$(pwd)}"
     read -e -i "$default_program_dir" -p "Backup script directory: " val
     config_values[PROGRAM_DIR]="${val:-$default_program_dir}"
-                value="${BASH_REMATCH[2]}"
+
+    # SOURCE/EXCLUDE lists
     default_source_list="${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}"
     read -e -i "$default_source_list" -p "Path to source list file: " val
     config_values[SOURCE_DIRS_LIST]="${val:-$default_source_list}"
-        done < "$CONFIG_FILE"
+
     default_exclude_list="${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}"
     read -e -i "$default_exclude_list" -p "Path to exclude list file: " val
     config_values[EXCLUDE_LIST]="${val:-$default_exclude_list}"
 
+    # Samba settings
     default_samba_server="${config_values[SAMBA_SERVER]:-}"
     read -e -i "$default_samba_server" -p "Samba server IP or hostname: " val
     config_values[SAMBA_SERVER]="${val:-$default_samba_server}"
@@ -41,12 +75,11 @@ load_existing_config() {
     read -e -i "$default_samba_user" -p "Samba username: " val
     config_values[SAMBA_USERNAME]="${val:-$default_samba_user}"
 
-    # Passwords are read silently; pressing Enter keeps existing value
     read -rsp "Samba password (press enter to keep existing): " val
     echo ""
     config_values[SAMBA_PASSWORD]="${val:-${config_values[SAMBA_PASSWORD]:-}}"
-        echo "All required packages are installed."
-    fi
+
+    # MySQL settings
     default_mysql_enabled="${config_values[MYSQL_BACKUP_ENABLED]:-false}"
     read -e -i "$default_mysql_enabled" -p "Enable MySQL database backup? (true/false): " val
     config_values[MYSQL_BACKUP_ENABLED]="${val:-$default_mysql_enabled}"
@@ -73,37 +106,10 @@ load_existing_config() {
         config_values[MYSQL_EXCLUDE_DBS]="${val:-$default_mysql_exclude}"
     fi
 
+    # Sync-only default
     default_sync_only="${config_values[SYNC_ONLY_DEFAULT]:-false}"
     read -e -i "$default_sync_only" -p "Set sync-only by default? (true/false): " val
     config_values[SYNC_ONLY_DEFAULT]="${val:-$default_sync_only}"
-
-    read -rp "Samba username (default: ${config_values[SAMBA_USERNAME]:-}): " val
-    config_values[SAMBA_USERNAME]="${val:-${config_values[SAMBA_USERNAME]:-}}"
-
-    read -rsp "Samba password (press enter to keep existing): " val
-    echo ""
-    config_values[SAMBA_PASSWORD]="${val:-${config_values[SAMBA_PASSWORD]:-}}"
-
-    # === MySQL Backup Settings ===
-    read -rp "Enable MySQL database backup? (true/false) [${config_values[MYSQL_BACKUP_ENABLED]:-false}]: " val
-    config_values[MYSQL_BACKUP_ENABLED]="${val:-${config_values[MYSQL_BACKUP_ENABLED]:-false}}"
-
-    if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
-        read -rp "MySQL username for backup (default: ${config_values[MYSQL_USERNAME]:-}): " val
-        config_values[MYSQL_USERNAME]="${val:-${config_values[MYSQL_USERNAME]:-}}"
-        read -rsp "MySQL password for backup (press enter to keep existing): " val
-        echo ""
-        config_values[MYSQL_PASSWORD]="${val:-${config_values[MYSQL_PASSWORD]:-}}"
-        read -rp "MySQL host (default: ${config_values[MYSQL_HOST]:-localhost}): " val
-        config_values[MYSQL_HOST]="${val:-${config_values[MYSQL_HOST]:-localhost}}"
-        read -rp "MySQL port (default: ${config_values[MYSQL_PORT]:-3306}): " val
-        config_values[MYSQL_PORT]="${val:-${config_values[MYSQL_PORT]:-3306}}"
-        read -rp "Excluded databases (space-separated, default: ${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}): " val
-        config_values[MYSQL_EXCLUDE_DBS]="${val:-${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}}"
-    fi
-
-    read -rp "Set sync-only by default? (true/false) [${config_values[SYNC_ONLY_DEFAULT]:-false}]: " val
-    config_values[SYNC_ONLY_DEFAULT]="${val:-${config_values[SYNC_ONLY_DEFAULT]:-false}}"
 }
 
 write_config() {
@@ -230,13 +236,13 @@ setup_cron_job() {
         *) echo "Invalid option. Skipping."; return ;;
     esac
 
-    script_path="$SCRIPT_DIR/startBackup.sh"
-    log_path="/var/log/autoBackup.log"
-    cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     script_path="$SCRIPT_DIR/startBackup.sh"
     log_path="/var/log/autoBackup.log"
     cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
+
+    current_cron=$(crontab -l 2>/dev/null || true)
+
     if echo "$current_cron" | grep -qF "$script_path"; then
         echo "ℹ Cron job already exists for this script. Skipping."
     else
