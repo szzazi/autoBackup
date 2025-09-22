@@ -28,7 +28,8 @@
         echo "      --pass <password>   Samba password (overrides config)"
         echo "      --dry-run           Run full flow in simulation mode (no actual copy)"
         echo "      --test-samba        Only test Samba/CIFS connection (mount & unmount)"
-        echo "      --sync-only <path>   Sync the specified local folder to the remote share (no zip)."
+    echo "      --sync-only <path>   Sync the specified local folder to the remote share (no zip)."
+    echo "                           If no <path> is provided, the script will read paths from SOURCE_DIRS_LIST in the config and sync each listed path."
         echo "  -h, --help              Show this help message"
         exit 0
     }
@@ -58,8 +59,13 @@
                     ;;
                 --sync-only)
                     SYNC_ONLY=true
-                    SYNC_PATH="$2"
-                    shift 2
+                    # optional path argument: only consume next token if it's not another flag
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        SYNC_PATH="$2"
+                        shift 2
+                    else
+                        shift
+                    fi
                     ;;
                 -h|--help)
                     print_help
@@ -93,6 +99,9 @@
         MYSQL_HOST="${MYSQL_HOST:-localhost}"
         MYSQL_PORT="${MYSQL_PORT:-3306}"
         MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
+
+        # Sync-only default from config
+        SYNC_ONLY_DEFAULT="${SYNC_ONLY_DEFAULT:-false}"
     }
     check_mysql_privileges() {
         echo "Checking MySQL user privileges for export..."
@@ -160,31 +169,66 @@
         cd "$PROGRAM_DIR" || { echo "Cannot change directory to $PROGRAM_DIR"; exit 1; }
     }
 
-sync_specified_folder() {
-    if [[ -z "$SYNC_PATH" ]]; then
-        echo "Error: --sync-only requires a local path argument."
-        exit 1
-    fi
+    sync_specified_folder() {
+        # If no explicit path provided, use SOURCE_DIRS_LIST
+        local paths=()
+        if [[ -n "$SYNC_PATH" ]]; then
+            paths=("$SYNC_PATH")
+        else
+            if [ ! -f "$SOURCE_DIRS_LIST" ]; then
+                echo "Error: source list not found: $SOURCE_DIRS_LIST"
+                exit 1
+            fi
+            while IFS= read -r line || [ -n "$line" ]; do
+                # skip empty lines and comments
+                line_trimmed="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+                [[ -z "$line_trimmed" || "$line_trimmed" =~ ^# ]] && continue
+                paths+=("$line_trimmed")
+            done < "$SOURCE_DIRS_LIST"
+        fi
 
-    if [ ! -d "$SYNC_PATH" ]; then
-        echo "Error: specified sync path does not exist: $SYNC_PATH"
-        exit 1
-    fi
+        if [ ${#paths[@]} -eq 0 ]; then
+            echo "No paths to sync."
+            return
+        fi
 
-    echo "Syncing $SYNC_PATH to remote share ${SAMBA_SERVER}:${SAMBA_FOLDER}..."
-    mount_remote_storage
+        mount_remote_storage
 
-    # Use rsync to copy the folder contents to the mounted remote; preserve hierarchy
-    if $DRY_RUN; then
-        echo "DRY RUN: rsync -avhn --delete \"$SYNC_PATH/\" \"$LOCAL_MOUNT_POINT/\""
-        rsync -avhn --delete "$SYNC_PATH/" "$LOCAL_MOUNT_POINT/"
-    else
-        rsync -avh --delete "$SYNC_PATH/" "$LOCAL_MOUNT_POINT/"
-    fi
+        for p in "${paths[@]}"; do
+            # expand globs
+            for expanded in $(eval echo $p); do
+                if [ ! -e "$expanded" ]; then
+                    echo "Skipping missing path: $expanded"
+                    continue
+                fi
 
-    unmount_remote_storage
-    echo "Sync completed."
-}
+                # calculate a relative path base so we don't include leading /
+                relpath="${expanded#/}"
+                if [ -d "$expanded" ]; then
+                    dest="$LOCAL_MOUNT_POINT/$relpath"
+                    echo "Syncing directory $expanded -> $dest/"
+                    mkdir -p "$dest"
+                    if $DRY_RUN; then
+                        rsync -avhn --delete "$expanded/" "$dest/"
+                    else
+                        rsync -avh --delete "$expanded/" "$dest/"
+                    fi
+                else
+                    dest_dir="$(dirname "$LOCAL_MOUNT_POINT/$relpath")"
+                    echo "Syncing file $expanded -> $dest_dir/"
+                    mkdir -p "$dest_dir"
+                    if $DRY_RUN; then
+                        rsync -avhn --delete "$expanded" "$dest_dir/"
+                    else
+                        rsync -avh --delete "$expanded" "$dest_dir/"
+                    fi
+                fi
+            done
+        done
+
+        unmount_remote_storage
+        echo "Sync completed."
+    }
 
     copy_source_dirs() {
         echo "Copying source directories..."
@@ -274,6 +318,18 @@ sync_specified_folder() {
     parse_arguments "$@"
     load_config
     resolve_credentials
+
+    # If config sets sync-only by default and CLI didn't enable/disable, enable it
+    if [[ "$SYNC_ONLY" != "true" && "$SYNC_ONLY_DEFAULT" == "true" ]]; then
+        SYNC_ONLY=true
+    fi
+
+    if $SYNC_ONLY; then
+        # run sync-only flow and exit
+        echo "Running in sync-only mode..."
+        sync_specified_folder
+        exit 0
+    fi
 
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."

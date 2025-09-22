@@ -56,6 +56,9 @@ prompt_user_input() {
     read -rsp "Samba password: " val
     echo ""
     config_values[SAMBA_PASSWORD]="$val"
+    
+    read -rp "Do you want to sync the folders only instead of compressing and uploading the archive? (true/false) [false]: " val
+    config_values[SYNC_ONLY_DEFAULT]="${val:-false}"
 }
 
 write_config() {
@@ -239,3 +242,11 @@ setup_cron_job
 echo ""
 echo "✅ Installation complete. You can now run: ./startBackup.sh"
 echo "To configure the script, edit $CONFIG_FILE or run the installer again."
+echo ""
+echo "Notes:"
+echo " - You can sync folders directly to the remote (no zip) with the --sync-only option."
+echo "   If you call: ./startBackup.sh --sync-only (without a path), the script will read the paths from SOURCE_DIRS_LIST in your config and sync each listed path."
+echo ""
+echo "Examples:" 
+echo "  ./startBackup.sh --sync-only /var/www        # sync a single folder"
+echo "  ./startBackup.sh --sync-only                # sync all paths listed in SOURCE_DIRS_LIST"
