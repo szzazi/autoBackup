@@ -9,6 +9,18 @@ CONFIG_EXAMPLE="./config.conf.example"
 
 declare -A config_values
 
+load_existing_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^([A-Za-z0-9_]+)="(.*)" ]]; then
+                key="${BASH_REMATCH[1]}"
+                value="${BASH_REMATCH[2]}"
+                config_values[$key]="$value"
+            fi
+        done < "$CONFIG_FILE"
+    fi
+}
+
 check_dependencies() {
     echo "Checking required packages..."
 
@@ -31,31 +43,51 @@ check_dependencies() {
 prompt_user_input() {
     echo ""
     echo "=== Configuration ==="
+    read -rp "Backup script directory (default: ${config_values[PROGRAM_DIR]:-$(pwd)}): " val
+    config_values[PROGRAM_DIR]="${val:-${config_values[PROGRAM_DIR]:-$(pwd)}}"
 
-    read -rp "Backup script directory (default: $(pwd)): " val
-    config_values[PROGRAM_DIR]="${val:-$(pwd)}"
+    read -rp "Path to source list file (default: ${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}): " val
+    config_values[SOURCE_DIRS_LIST]="${val:-${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}}"
 
-    read -rp "Path to source list file (default: \$PROGRAM_DIR/sourceList.txt): " val
-    config_values[SOURCE_DIRS_LIST]="${val:-${config_values[PROGRAM_DIR]}/sourceList.txt}"
+    read -rp "Path to exclude list file (default: ${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}): " val
+    config_values[EXCLUDE_LIST]="${val:-${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}}"
 
-    read -rp "Path to exclude list file (default: \$PROGRAM_DIR/excludeList.txt): " val
-    config_values[EXCLUDE_LIST]="${val:-${config_values[PROGRAM_DIR]}/excludeList.txt}"
+    read -rp "Samba server IP or hostname (default: ${config_values[SAMBA_SERVER]:-}): " val
+    config_values[SAMBA_SERVER]="${val:-${config_values[SAMBA_SERVER]:-}}"
 
-    read -rp "Samba server IP or hostname: " val
-    config_values[SAMBA_SERVER]="$val"
+    read -rp "Samba folder (e.g., /backupTarget) (default: ${config_values[SAMBA_FOLDER]:-}): " val
+    config_values[SAMBA_FOLDER]="${val:-${config_values[SAMBA_FOLDER]:-}}"
 
-    read -rp "Samba folder (e.g., /backupTarget): " val
-    config_values[SAMBA_FOLDER]="$val"
+    read -rp "Samba version (e.g., 1.0, 3.0) (default: ${config_values[SAMBA_VERSION]:-1.0}): " val
+    config_values[SAMBA_VERSION]="${val:-${config_values[SAMBA_VERSION]:-1.0}}"
 
-    read -rp "Samba version (e.g., 1.0, 3.0): " val
-    config_values[SAMBA_VERSION]="$val"
+    read -rp "Samba username (default: ${config_values[SAMBA_USERNAME]:-}): " val
+    config_values[SAMBA_USERNAME]="${val:-${config_values[SAMBA_USERNAME]:-}}"
 
-    read -rp "Samba username: " val
-    config_values[SAMBA_USERNAME]="$val"
-
-    read -rsp "Samba password: " val
+    read -rsp "Samba password (press enter to keep existing): " val
     echo ""
-    config_values[SAMBA_PASSWORD]="$val"
+    config_values[SAMBA_PASSWORD]="${val:-${config_values[SAMBA_PASSWORD]:-}}"
+
+    # === MySQL Backup Settings ===
+    read -rp "Enable MySQL database backup? (true/false) [${config_values[MYSQL_BACKUP_ENABLED]:-false}]: " val
+    config_values[MYSQL_BACKUP_ENABLED]="${val:-${config_values[MYSQL_BACKUP_ENABLED]:-false}}"
+
+    if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
+        read -rp "MySQL username for backup (default: ${config_values[MYSQL_USERNAME]:-}): " val
+        config_values[MYSQL_USERNAME]="${val:-${config_values[MYSQL_USERNAME]:-}}"
+        read -rsp "MySQL password for backup (press enter to keep existing): " val
+        echo ""
+        config_values[MYSQL_PASSWORD]="${val:-${config_values[MYSQL_PASSWORD]:-}}"
+        read -rp "MySQL host (default: ${config_values[MYSQL_HOST]:-localhost}): " val
+        config_values[MYSQL_HOST]="${val:-${config_values[MYSQL_HOST]:-localhost}}"
+        read -rp "MySQL port (default: ${config_values[MYSQL_PORT]:-3306}): " val
+        config_values[MYSQL_PORT]="${val:-${config_values[MYSQL_PORT]:-3306}}"
+        read -rp "Excluded databases (space-separated, default: ${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}): " val
+        config_values[MYSQL_EXCLUDE_DBS]="${val:-${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}}"
+    fi
+
+    read -rp "Set sync-only by default? (true/false) [${config_values[SYNC_ONLY_DEFAULT]:-false}]: " val
+    config_values[SYNC_ONLY_DEFAULT]="${val:-${config_values[SYNC_ONLY_DEFAULT]:-false}}"
     
     read -rp "Do you want to sync the folders only instead of compressing and uploading the archive? (true/false) [false]: " val
     config_values[SYNC_ONLY_DEFAULT]="${val:-false}"
@@ -205,32 +237,10 @@ setup_cron_job() {
 
 echo "Welcome to Auto Backup installer"
 
-if [ -f "$CONFIG_FILE" ]; then
-    echo "Config file already exists at $CONFIG_FILE."
-    if confirm; then
-            # === MySQL Backup Settings ===
-            read -rp "Enable MySQL database backup? (true/false) [true]: " val
-            config_values[MYSQL_BACKUP_ENABLED]="${val:-true}"
+read -rp "Path to config file to use (default: ./config.conf): " input_cfg
+CONFIG_FILE="${input_cfg:-./config.conf}"
 
-            if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
-                read -rp "MySQL username for backup: " val
-                config_values[MYSQL_USERNAME]="$val"
-                read -rsp "MySQL password for backup: " val
-                echo ""
-                config_values[MYSQL_PASSWORD]="$val"
-                read -rp "MySQL host (default: localhost): " val
-                config_values[MYSQL_HOST]="${val:-localhost}"
-                read -rp "MySQL port (default: 3306): " val
-                config_values[MYSQL_PORT]="${val:-3306}"
-                read -rp "Excluded databases (space-separated, default: mysql phpmyadmin): " val
-                config_values[MYSQL_EXCLUDE_DBS]="${val:-mysql phpmyadmin}"
-            fi
-        echo "Reconfiguring..."
-    else
-        echo "Installation cancelled."
-        exit 0
-    fi
-fi
+load_existing_config
 
 check_dependencies
 prompt_user_input
