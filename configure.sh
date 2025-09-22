@@ -12,54 +12,70 @@ declare -A config_values
 load_existing_config() {
     if [ -f "$CONFIG_FILE" ]; then
         while IFS= read -r line; do
-            if [[ "$line" =~ ^([A-Za-z0-9_]+)="(.*)" ]]; then
-                key="${BASH_REMATCH[1]}"
+    # Use readline editable input with prefilled default when available
+    default_program_dir="${config_values[PROGRAM_DIR]:-$(pwd)}"
+    read -e -i "$default_program_dir" -p "Backup script directory: " val
+    config_values[PROGRAM_DIR]="${val:-$default_program_dir}"
                 value="${BASH_REMATCH[2]}"
-                config_values[$key]="$value"
-            fi
+    default_source_list="${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}"
+    read -e -i "$default_source_list" -p "Path to source list file: " val
+    config_values[SOURCE_DIRS_LIST]="${val:-$default_source_list}"
         done < "$CONFIG_FILE"
-    fi
-}
+    default_exclude_list="${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}"
+    read -e -i "$default_exclude_list" -p "Path to exclude list file: " val
+    config_values[EXCLUDE_LIST]="${val:-$default_exclude_list}"
 
-check_dependencies() {
-    echo "Checking required packages..."
+    default_samba_server="${config_values[SAMBA_SERVER]:-}"
+    read -e -i "$default_samba_server" -p "Samba server IP or hostname: " val
+    config_values[SAMBA_SERVER]="${val:-$default_samba_server}"
 
-    missing=()
-    for pkg in rsync zip cifs-utils; do
-        if ! command -v "$pkg" >/dev/null 2>&1; then
-            missing+=("$pkg")
-        fi
-    done
+    default_samba_folder="${config_values[SAMBA_FOLDER]:-}"
+    read -e -i "$default_samba_folder" -p "Samba folder (e.g., /backupTarget): " val
+    config_values[SAMBA_FOLDER]="${val:-$default_samba_folder}"
 
-    if (( ${#missing[@]} > 0 )); then
-        echo "Installing missing packages: ${missing[*]}"
-        apt-get update
-        apt-get install -y "${missing[@]}"
-    else
+    default_samba_version="${config_values[SAMBA_VERSION]:-1.0}"
+    read -e -i "$default_samba_version" -p "Samba version (e.g., 1.0, 3.0): " val
+    config_values[SAMBA_VERSION]="${val:-$default_samba_version}"
+
+    default_samba_user="${config_values[SAMBA_USERNAME]:-}"
+    read -e -i "$default_samba_user" -p "Samba username: " val
+    config_values[SAMBA_USERNAME]="${val:-$default_samba_user}"
+
+    # Passwords are read silently; pressing Enter keeps existing value
+    read -rsp "Samba password (press enter to keep existing): " val
+    echo ""
+    config_values[SAMBA_PASSWORD]="${val:-${config_values[SAMBA_PASSWORD]:-}}"
         echo "All required packages are installed."
     fi
-}
+    default_mysql_enabled="${config_values[MYSQL_BACKUP_ENABLED]:-false}"
+    read -e -i "$default_mysql_enabled" -p "Enable MySQL database backup? (true/false): " val
+    config_values[MYSQL_BACKUP_ENABLED]="${val:-$default_mysql_enabled}"
 
-prompt_user_input() {
-    echo ""
-    echo "=== Configuration ==="
-    read -rp "Backup script directory (default: ${config_values[PROGRAM_DIR]:-$(pwd)}): " val
-    config_values[PROGRAM_DIR]="${val:-${config_values[PROGRAM_DIR]:-$(pwd)}}"
+    if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
+        default_mysql_user="${config_values[MYSQL_USERNAME]:-}"
+        read -e -i "$default_mysql_user" -p "MySQL username for backup: " val
+        config_values[MYSQL_USERNAME]="${val:-$default_mysql_user}"
 
-    read -rp "Path to source list file (default: ${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}): " val
-    config_values[SOURCE_DIRS_LIST]="${val:-${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}}"
+        read -rsp "MySQL password for backup (press enter to keep existing): " val
+        echo ""
+        config_values[MYSQL_PASSWORD]="${val:-${config_values[MYSQL_PASSWORD]:-}}"
 
-    read -rp "Path to exclude list file (default: ${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}): " val
-    config_values[EXCLUDE_LIST]="${val:-${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}}"
+        default_mysql_host="${config_values[MYSQL_HOST]:-localhost}"
+        read -e -i "$default_mysql_host" -p "MySQL host: " val
+        config_values[MYSQL_HOST]="${val:-$default_mysql_host}"
 
-    read -rp "Samba server IP or hostname (default: ${config_values[SAMBA_SERVER]:-}): " val
-    config_values[SAMBA_SERVER]="${val:-${config_values[SAMBA_SERVER]:-}}"
+        default_mysql_port="${config_values[MYSQL_PORT]:-3306}"
+        read -e -i "$default_mysql_port" -p "MySQL port: " val
+        config_values[MYSQL_PORT]="${val:-$default_mysql_port}"
 
-    read -rp "Samba folder (e.g., /backupTarget) (default: ${config_values[SAMBA_FOLDER]:-}): " val
-    config_values[SAMBA_FOLDER]="${val:-${config_values[SAMBA_FOLDER]:-}}"
+        default_mysql_exclude="${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}"
+        read -e -i "$default_mysql_exclude" -p "Excluded databases (space-separated): " val
+        config_values[MYSQL_EXCLUDE_DBS]="${val:-$default_mysql_exclude}"
+    fi
 
-    read -rp "Samba version (e.g., 1.0, 3.0) (default: ${config_values[SAMBA_VERSION]:-1.0}): " val
-    config_values[SAMBA_VERSION]="${val:-${config_values[SAMBA_VERSION]:-1.0}}"
+    default_sync_only="${config_values[SYNC_ONLY_DEFAULT]:-false}"
+    read -e -i "$default_sync_only" -p "Set sync-only by default? (true/false): " val
+    config_values[SYNC_ONLY_DEFAULT]="${val:-$default_sync_only}"
 
     read -rp "Samba username (default: ${config_values[SAMBA_USERNAME]:-}): " val
     config_values[SAMBA_USERNAME]="${val:-${config_values[SAMBA_USERNAME]:-}}"
