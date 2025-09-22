@@ -88,9 +88,6 @@ prompt_user_input() {
 
     read -rp "Set sync-only by default? (true/false) [${config_values[SYNC_ONLY_DEFAULT]:-false}]: " val
     config_values[SYNC_ONLY_DEFAULT]="${val:-${config_values[SYNC_ONLY_DEFAULT]:-false}}"
-    
-    read -rp "Do you want to sync the folders only instead of compressing and uploading the archive? (true/false) [false]: " val
-    config_values[SYNC_ONLY_DEFAULT]="${val:-false}"
 }
 
 write_config() {
@@ -220,9 +217,10 @@ setup_cron_job() {
     script_path="$SCRIPT_DIR/startBackup.sh"
     log_path="/var/log/autoBackup.log"
     cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
-
-    current_cron=$(crontab -l 2>/dev/null)
-
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    script_path="$SCRIPT_DIR/startBackup.sh"
+    log_path="/var/log/autoBackup.log"
+    cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
     if echo "$current_cron" | grep -qF "$script_path"; then
         echo "ℹ Cron job already exists for this script. Skipping."
     else
