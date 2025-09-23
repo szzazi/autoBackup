@@ -9,6 +9,18 @@ CONFIG_EXAMPLE="./config.conf.example"
 
 declare -A config_values
 
+load_existing_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^([A-Za-z0-9_]+)="?(.*)"?$ ]]; then
+                key="${BASH_REMATCH[1]}"
+                value="${BASH_REMATCH[2]}"
+                config_values[$key]="$value"
+            fi
+        done < "$CONFIG_FILE"
+    fi
+}
+
 check_dependencies() {
     echo "Checking required packages..."
 
@@ -32,30 +44,72 @@ prompt_user_input() {
     echo ""
     echo "=== Configuration ==="
 
-    read -rp "Backup script directory (default: $(pwd)): " val
-    config_values[PROGRAM_DIR]="${val:-$(pwd)}"
+    # PROGRAM_DIR
+    default_program_dir="${config_values[PROGRAM_DIR]:-$(pwd)}"
+    read -e -i "$default_program_dir" -p "Backup script directory: " val
+    config_values[PROGRAM_DIR]="${val:-$default_program_dir}"
 
-    read -rp "Path to source list file (default: \$PROGRAM_DIR/sourceList.txt): " val
-    config_values[SOURCE_DIRS_LIST]="${val:-${config_values[PROGRAM_DIR]}/sourceList.txt}"
+    # SOURCE/EXCLUDE lists
+    default_source_list="${config_values[SOURCE_DIRS_LIST]:-${config_values[PROGRAM_DIR]}/sourceList.txt}"
+    read -e -i "$default_source_list" -p "Path to source list file: " val
+    config_values[SOURCE_DIRS_LIST]="${val:-$default_source_list}"
 
-    read -rp "Path to exclude list file (default: \$PROGRAM_DIR/excludeList.txt): " val
-    config_values[EXCLUDE_LIST]="${val:-${config_values[PROGRAM_DIR]}/excludeList.txt}"
+    default_exclude_list="${config_values[EXCLUDE_LIST]:-${config_values[PROGRAM_DIR]}/excludeList.txt}"
+    read -e -i "$default_exclude_list" -p "Path to exclude list file: " val
+    config_values[EXCLUDE_LIST]="${val:-$default_exclude_list}"
 
-    read -rp "Samba server IP or hostname: " val
-    config_values[SAMBA_SERVER]="$val"
+    # Samba settings
+    default_samba_server="${config_values[SAMBA_SERVER]:-}"
+    read -e -i "$default_samba_server" -p "Samba server IP or hostname: " val
+    config_values[SAMBA_SERVER]="${val:-$default_samba_server}"
 
-    read -rp "Samba folder (e.g., /backupTarget): " val
-    config_values[SAMBA_FOLDER]="$val"
+    default_samba_folder="${config_values[SAMBA_FOLDER]:-}"
+    read -e -i "$default_samba_folder" -p "Samba folder (e.g., /backupTarget): " val
+    config_values[SAMBA_FOLDER]="${val:-$default_samba_folder}"
 
-    read -rp "Samba version (e.g., 1.0, 3.0): " val
-    config_values[SAMBA_VERSION]="$val"
+    default_samba_version="${config_values[SAMBA_VERSION]:-1.0}"
+    read -e -i "$default_samba_version" -p "Samba version (e.g., 1.0, 3.0): " val
+    config_values[SAMBA_VERSION]="${val:-$default_samba_version}"
 
-    read -rp "Samba username: " val
-    config_values[SAMBA_USERNAME]="$val"
+    default_samba_user="${config_values[SAMBA_USERNAME]:-}"
+    read -e -i "$default_samba_user" -p "Samba username: " val
+    config_values[SAMBA_USERNAME]="${val:-$default_samba_user}"
 
-    read -rsp "Samba password: " val
+    read -rsp "Samba password (press enter to keep existing): " val
     echo ""
-    config_values[SAMBA_PASSWORD]="$val"
+    config_values[SAMBA_PASSWORD]="${val:-${config_values[SAMBA_PASSWORD]:-}}"
+
+    # MySQL settings
+    default_mysql_enabled="${config_values[MYSQL_BACKUP_ENABLED]:-false}"
+    read -e -i "$default_mysql_enabled" -p "Enable MySQL database backup? (true/false): " val
+    config_values[MYSQL_BACKUP_ENABLED]="${val:-$default_mysql_enabled}"
+
+    if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
+        default_mysql_user="${config_values[MYSQL_USERNAME]:-}"
+        read -e -i "$default_mysql_user" -p "MySQL username for backup: " val
+        config_values[MYSQL_USERNAME]="${val:-$default_mysql_user}"
+
+        read -rsp "MySQL password for backup (press enter to keep existing): " val
+        echo ""
+        config_values[MYSQL_PASSWORD]="${val:-${config_values[MYSQL_PASSWORD]:-}}"
+
+        default_mysql_host="${config_values[MYSQL_HOST]:-localhost}"
+        read -e -i "$default_mysql_host" -p "MySQL host: " val
+        config_values[MYSQL_HOST]="${val:-$default_mysql_host}"
+
+        default_mysql_port="${config_values[MYSQL_PORT]:-3306}"
+        read -e -i "$default_mysql_port" -p "MySQL port: " val
+        config_values[MYSQL_PORT]="${val:-$default_mysql_port}"
+
+        default_mysql_exclude="${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}"
+        read -e -i "$default_mysql_exclude" -p "Excluded databases (space-separated): " val
+        config_values[MYSQL_EXCLUDE_DBS]="${val:-$default_mysql_exclude}"
+    fi
+
+    # Sync-only default
+    default_sync_only="${config_values[SYNC_ONLY_DEFAULT]:-false}"
+    read -e -i "$default_sync_only" -p "Set sync-only by default? (true/false): " val
+    config_values[SYNC_ONLY_DEFAULT]="${val:-$default_sync_only}"
 }
 
 write_config() {
@@ -182,11 +236,12 @@ setup_cron_job() {
         *) echo "Invalid option. Skipping."; return ;;
     esac
 
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     script_path="$SCRIPT_DIR/startBackup.sh"
     log_path="/var/log/autoBackup.log"
     cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
 
-    current_cron=$(crontab -l 2>/dev/null)
+    current_cron=$(crontab -l 2>/dev/null || true)
 
     if echo "$current_cron" | grep -qF "$script_path"; then
         echo "ℹ Cron job already exists for this script. Skipping."
@@ -202,32 +257,10 @@ setup_cron_job() {
 
 echo "Welcome to Auto Backup installer"
 
-if [ -f "$CONFIG_FILE" ]; then
-    echo "Config file already exists at $CONFIG_FILE."
-    if confirm; then
-            # === MySQL Backup Settings ===
-            read -rp "Enable MySQL database backup? (true/false) [true]: " val
-            config_values[MYSQL_BACKUP_ENABLED]="${val:-true}"
+read -rp "Path to config file to use (default: ./config.conf): " input_cfg
+CONFIG_FILE="${input_cfg:-./config.conf}"
 
-            if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
-                read -rp "MySQL username for backup: " val
-                config_values[MYSQL_USERNAME]="$val"
-                read -rsp "MySQL password for backup: " val
-                echo ""
-                config_values[MYSQL_PASSWORD]="$val"
-                read -rp "MySQL host (default: localhost): " val
-                config_values[MYSQL_HOST]="${val:-localhost}"
-                read -rp "MySQL port (default: 3306): " val
-                config_values[MYSQL_PORT]="${val:-3306}"
-                read -rp "Excluded databases (space-separated, default: mysql phpmyadmin): " val
-                config_values[MYSQL_EXCLUDE_DBS]="${val:-mysql phpmyadmin}"
-            fi
-        echo "Reconfiguring..."
-    else
-        echo "Installation cancelled."
-        exit 0
-    fi
-fi
+load_existing_config
 
 check_dependencies
 prompt_user_input
@@ -239,3 +272,11 @@ setup_cron_job
 echo ""
 echo "✅ Installation complete. You can now run: ./startBackup.sh"
 echo "To configure the script, edit $CONFIG_FILE or run the installer again."
+echo ""
+echo "Notes:"
+echo " - You can sync folders directly to the remote (no zip) with the --sync-only option."
+echo "   If you call: ./startBackup.sh --sync-only (without a path), the script will read the paths from SOURCE_DIRS_LIST in your config and sync each listed path."
+echo ""
+echo "Examples:" 
+echo "  ./startBackup.sh --sync-only /var/www        # sync a single folder"
+echo "  ./startBackup.sh --sync-only                # sync all paths listed in SOURCE_DIRS_LIST"

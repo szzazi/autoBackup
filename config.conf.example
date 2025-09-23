@@ -59,6 +59,10 @@ MYSQL_PORT="3306"
 # Space-separated list of databases to exclude from backup.
 # Default: mysql phpmyadmin performance_schema
 MYSQL_EXCLUDE_DBS="mysql phpmyadmin"
+# === SYNC-ONLY DEFAULT ===
+# If set to "true", the script will run in sync-only mode by default (no zip),
+# using paths from SOURCE_DIRS_LIST. CLI --sync-only still overrides this.
+SYNC_ONLY_DEFAULT="false"
 
 # === SAMBA/CIFS SETTINGS ===
 ###########################

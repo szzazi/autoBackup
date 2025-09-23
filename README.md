@@ -89,6 +89,19 @@ SAMBA_USERNAME="backupuser"
 SAMBA_PASSWORD="mypassword"
 ```
 
+Configuration option to run sync-only by default
+
+- `SYNC_ONLY_DEFAULT` in `config.conf` controls whether the script runs in sync-only mode when no CLI `--sync-only` flag is given.
+- Valid values: `"true"` or `"false"`.
+- The installer (`configure.sh`) prompts for this setting during configuration.
+- CLI `--sync-only` always overrides the config value for a single run.
+
+Example config snippet:
+
+```bash
+SYNC_ONLY_DEFAULT="false"   # set to "true" to make the script run sync-only by default
+```
+
 ---
 
 ## 🧪 Dry Run Mode
@@ -211,6 +224,20 @@ This will:
 - Immediately unmount it
 - Print connection test results
 - Exit without performing any backup or file operations
+
+Run only a sync to remote (no zip):
+
+```bash
+./startBackup.sh --sync-only /path/to/local/folder
+```
+
+If you omit the path, the script will read `SOURCE_DIRS_LIST` from `config.conf` and sync each path listed there:
+
+```bash
+./startBackup.sh --sync-only
+```
+
+Use `--dry-run` with `--sync-only` to simulate the sync operation.
 
 ---
 
