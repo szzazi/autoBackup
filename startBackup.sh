@@ -189,7 +189,7 @@
 
         for p in "${paths[@]}"; do
             # expand globs
-            for expanded in $(eval echo $p); do
+            for expanded in $(printf "%s\n" $p); do
                 if [ ! -e "$expanded" ]; then
                     echo "Skipping missing path: $expanded"
                     continue
@@ -202,18 +202,18 @@
                     echo "Syncing directory $expanded -> $dest/"
                     mkdir -p "$dest"
                     if $DRY_RUN; then
-                        rsync -avhn --delete "$expanded/" "$dest/"
+                        rsync -avhn --delete --exclude-from="$EXCLUDE_LIST" "$expanded/" "$dest/"
                     else
-                        rsync -avh --delete "$expanded/" "$dest/"
+                        rsync -avh --delete --exclude-from="$EXCLUDE_LIST" "$expanded/" "$dest/"
                     fi
                 else
                     dest_dir="$(dirname "$LOCAL_MOUNT_POINT/$relpath")"
                     echo "Syncing file $expanded -> $dest_dir/"
                     mkdir -p "$dest_dir"
                     if $DRY_RUN; then
-                        rsync -avhn --delete "$expanded" "$dest_dir/"
+                        rsync -avhn --delete --exclude-from="$EXCLUDE_LIST" "$expanded" "$dest_dir/"
                     else
-                        rsync -avh --delete "$expanded" "$dest_dir/"
+                        rsync -avh --delete --exclude-from="$EXCLUDE_LIST" "$expanded" "$dest_dir/"
                     fi
                 fi
             done
