@@ -1,4 +1,4 @@
-    #!/bin/bash
+#!/bin/bash
     #########################################################
     # Automatic backup script with optional dry-run support
     # - Uses external config (with override)
@@ -6,7 +6,7 @@
     # - Supports dry-run mode with --dry-run switch
     #########################################################
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
     CONFIG_FILE="$SCRIPT_DIR/config.conf"
     DESTINATION_DIR="$SCRIPT_DIR/temp"
     LOCAL_MOUNT_POINT="$SCRIPT_DIR/remote"
@@ -141,7 +141,7 @@
         echo "=============================================="
         echo "Start auto backup script at ${timestamp}"
         echo "Simulation mode: $DRY_RUN"
-        echo "Working directory: \"$PWD\""
+        echo "Working directory: \"$SCRIPT_DIR\""
         echo "=============================================="
         echo "Directory files:"
         ls -la
@@ -238,6 +238,7 @@
     # === Main sequence ===
 
     parse_arguments "$@"
+    print_start_info
     load_config
     resolve_credentials
 
@@ -249,7 +250,6 @@
         exit 0
     fi
 
-    print_start_info
     change_to_program_dir
     copy_source_dirs
     if [ "$MYSQL_BACKUP_ENABLED" = "true" ]; then
