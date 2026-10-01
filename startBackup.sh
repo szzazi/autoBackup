@@ -155,8 +155,11 @@
     copy_source_dirs() {
         echo "Copying source directories..."
         mkdir -p "$DESTINATION_DIR"
+        # The mount point and the temp dir are always excluded, regardless of the exclude list,
+        # so the remote content can never be copied back to this machine.
         for path in $(cat "$SOURCE_DIRS_LIST"); do
-            rsync -avr --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
+            rsync -avr --exclude="$LOCAL_MOUNT_POINT" --exclude="$DESTINATION_DIR" \
+                --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
         done
     }
 
