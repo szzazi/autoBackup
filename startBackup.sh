@@ -224,6 +224,27 @@
         fi
     }
 
+    # A mount left over from an interrupted run would be readable by copy_source_dirs
+    ensure_remote_unmounted() {
+        local attempt
+        for attempt in {1..10}; do
+            mountpoint -q "$LOCAL_MOUNT_POINT" || return 0
+            echo "\"$LOCAL_MOUNT_POINT\" is still mounted from a previous run, unmounting (attempt $attempt/10)..."
+            umount "$LOCAL_MOUNT_POINT" || sleep 1
+        done
+
+        if mountpoint -q "$LOCAL_MOUNT_POINT"; then
+            echo "Cannot unmount $LOCAL_MOUNT_POINT, aborting."
+            exit 1
+        fi
+    }
+
+    unmount_on_exit() {
+        if mountpoint -q "$LOCAL_MOUNT_POINT"; then
+            unmount_remote_storage
+        fi
+    }
+
     cleanup_local_backup() {
         echo "Cleaning up local files..."
         rm -f "$BACKUP_FILENAME"
@@ -240,10 +261,16 @@
 
     # === Main sequence ===
 
+    # Never leave the share mounted, even if the script fails or is interrupted
+    trap unmount_on_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
     parse_arguments "$@"
     print_start_info
     load_config
     resolve_credentials
+    ensure_remote_unmounted
 
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
