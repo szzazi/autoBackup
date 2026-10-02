@@ -10,6 +10,7 @@
     CONFIG_FILE="$SCRIPT_DIR/config.conf"
     DESTINATION_DIR="$SCRIPT_DIR/temp"
     LOCAL_MOUNT_POINT="$SCRIPT_DIR/remote"
+    LOCK_FILE="$SCRIPT_DIR/.autoBackup.lock"
 
     # Optional CLI overrides
     CLI_USERNAME=""
@@ -239,9 +240,19 @@
         fi
     }
 
-    unmount_on_exit() {
+    # Only one instance may run at a time. The kernel releases the lock when the process ends,
+    # so an interrupted run cannot leave a stale lock behind.
+    acquire_lock() {
+        exec 9>"$LOCK_FILE" || { echo "Cannot open lock file: $LOCK_FILE"; exit 1; }
+        flock -n 9 || { echo "Another backup is already running, exiting."; exit 1; }
+    }
+
+    cleanup_on_exit() {
         if mountpoint -q "$LOCAL_MOUNT_POINT"; then
             unmount_remote_storage
+        fi
+        if [ -d "$DESTINATION_DIR" ] || { [ -n "$BACKUP_FILENAME" ] && [ -f "$BACKUP_FILENAME" ]; }; then
+            cleanup_local_backup
         fi
     }
 
@@ -261,12 +272,16 @@
 
     # === Main sequence ===
 
-    # Never leave the share mounted, even if the script fails or is interrupted
-    trap unmount_on_exit EXIT
+    parse_arguments "$@"
+
+    # The lock must be held before the trap is set, so an instance that did not get it touches nothing
+    acquire_lock
+
+    # Never leave the share mounted or local leftovers behind, even if the script fails or is interrupted
+    trap cleanup_on_exit EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
-    parse_arguments "$@"
     print_start_info
     load_config
     resolve_credentials
