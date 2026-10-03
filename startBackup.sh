@@ -10,6 +10,7 @@
     CONFIG_FILE="$SCRIPT_DIR/config.conf"
     DESTINATION_DIR="$SCRIPT_DIR/temp"
     LOCAL_MOUNT_POINT="$SCRIPT_DIR/remote"
+    LOCK_FILE="$SCRIPT_DIR/.autoBackup.lock"
 
     # Optional CLI overrides
     CLI_USERNAME=""
@@ -155,8 +156,11 @@
     copy_source_dirs() {
         echo "Copying source directories..."
         mkdir -p "$DESTINATION_DIR"
+        # The mount point and the temp dir are always excluded, regardless of the exclude list,
+        # so the remote content can never be copied back to this machine.
         for path in $(cat "$SOURCE_DIRS_LIST"); do
-            rsync -avr --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
+            rsync -avr --exclude="$LOCAL_MOUNT_POINT" --exclude="$DESTINATION_DIR" \
+                --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
         done
     }
 
@@ -221,6 +225,37 @@
         fi
     }
 
+    # A mount left over from an interrupted run would be readable by copy_source_dirs
+    ensure_remote_unmounted() {
+        local attempt
+        for attempt in {1..10}; do
+            mountpoint -q "$LOCAL_MOUNT_POINT" || return 0
+            echo "\"$LOCAL_MOUNT_POINT\" is still mounted from a previous run, unmounting (attempt $attempt/10)..."
+            umount "$LOCAL_MOUNT_POINT" || sleep 1
+        done
+
+        if mountpoint -q "$LOCAL_MOUNT_POINT"; then
+            echo "Cannot unmount $LOCAL_MOUNT_POINT, aborting."
+            exit 1
+        fi
+    }
+
+    # Only one instance may run at a time. The kernel releases the lock when the process ends,
+    # so an interrupted run cannot leave a stale lock behind.
+    acquire_lock() {
+        exec 9>"$LOCK_FILE" || { echo "Cannot open lock file: $LOCK_FILE"; exit 1; }
+        flock -n 9 || { echo "Another backup is already running, exiting."; exit 1; }
+    }
+
+    cleanup_on_exit() {
+        if mountpoint -q "$LOCAL_MOUNT_POINT"; then
+            unmount_remote_storage
+        fi
+        if [ -d "$DESTINATION_DIR" ] || { [ -n "$BACKUP_FILENAME" ] && [ -f "$BACKUP_FILENAME" ]; }; then
+            cleanup_local_backup
+        fi
+    }
+
     cleanup_local_backup() {
         echo "Cleaning up local files..."
         rm -f "$BACKUP_FILENAME"
@@ -238,9 +273,19 @@
     # === Main sequence ===
 
     parse_arguments "$@"
+
+    # The lock must be held before the trap is set, so an instance that did not get it touches nothing
+    acquire_lock
+
+    # Never leave the share mounted or local leftovers behind, even if the script fails or is interrupted
+    trap cleanup_on_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
     print_start_info
     load_config
     resolve_credentials
+    ensure_remote_unmounted
 
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
