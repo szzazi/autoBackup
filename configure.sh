@@ -56,6 +56,25 @@ prompt_user_input() {
     read -rsp "Samba password: " val
     echo ""
     config_values[SAMBA_PASSWORD]="$val"
+
+    # === Wake-on-LAN Settings ===
+    read -rp "Enable Wake-on-LAN before mounting? (true/false) [false]: " val
+    config_values[WOL_ENABLED]="${val:-false}"
+
+    if [[ "${config_values[WOL_ENABLED]}" == "true" ]]; then
+        read -rp "MAC address of the remote machine: " val
+        config_values[WOL_MAC]="$val"
+        read -rp "IP to ping for availability (default: ${config_values[SAMBA_SERVER]}): " val
+        config_values[WOL_PING_IP]="${val:-${config_values[SAMBA_SERVER]}}"
+        read -rp "Max seconds to wait for wake-up (default: 120): " val
+        config_values[WOL_WAKEUP_TIMEOUT_SEC]="${val:-120}"
+        read -rp "Network interface for etherwake (empty = auto): " val
+        config_values[WOL_INTERFACE]="$val"
+    fi
+
+    # === Sentry Error Reporting ===
+    read -rp "Sentry DSN for error reporting (empty = disabled): " val
+    config_values[SENTRY_DSN]="$val"
 }
 
 write_config() {
