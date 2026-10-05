@@ -99,7 +99,8 @@ MOUNT_RETRIES="5"
 MOUNT_RETRY_DELAY_SEC="10"
 
 # === SENTRY ERROR REPORTING (OPTIONAL) ===
-# Failures (WOL wake-up timeout, WOL misconfiguration, mount failure) are sent to Sentry.
+# Every failure (WOL, mount, copy, MySQL dump, compression, upload, unmount,
+# another run still active, interruption, unexpected exit) is sent to Sentry.
 # Get the DSN from Sentry: Project Settings > Client Keys (DSN). Leave empty to disable.
 # Uses sentry-cli if installed, otherwise curl.
 SENTRY_DSN=""

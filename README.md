@@ -197,7 +197,22 @@ CLI overrides: `--wol --wol-mac <mac> --wol-ping-ip <ip> --wol-timeout <sec>`.
 
 ## 🚨 Optional Sentry Error Reporting
 
-Failures (WOL misconfiguration, host not waking up, mount failure) are sent to [Sentry](https://sentry.io) as error events. Set the DSN from *Project Settings → Client Keys (DSN)*:
+Failures are sent to [Sentry](https://sentry.io) as events, grouped by type:
+
+| Event | Level | Script |
+| --- | --- | --- |
+| Missing credentials / program dir / source list, WOL misconfigured | error | aborts |
+| Remote host did not wake up, WOL send failed | error | aborts |
+| Mount failed (after retries), stale mount from a previous run | error | aborts |
+| Compression failed, upload to the share failed | error | aborts |
+| Some source directories could not be copied | error | continues (partial backup) |
+| Some MySQL databases/tables could not be dumped | error | continues (partial backup) |
+| Unmount failed | warning | continues |
+| Another backup is already running | warning | aborts |
+| Interrupted (Ctrl+C / SIGTERM) | warning | aborts |
+| Any other non-zero exit | error | — |
+
+A missing config file cannot be reported, since the DSN is read from it. Set the DSN from *Project Settings → Client Keys (DSN)*:
 
 ```bash
 SENTRY_DSN="https://<public_key>@o000000.ingest.sentry.io/0000000"

@@ -23,6 +23,8 @@
     CLI_WOL_MAC=""
     CLI_WOL_PING_IP=""
     CLI_WOL_TIMEOUT=""
+    SENTRY_DSN=""
+    SENTRY_REPORTED=false
 
     print_help() {
         echo "Usage: $0 [--config <path>] [--user <username>] [--pass <password>] [--dry-run] [--test-samba]"
@@ -133,12 +135,6 @@
         MYSQL_PORT="${MYSQL_PORT:-3306}"
         MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
 
-        # Set MySQL defaults if not present
-        MYSQL_USERNAME="${MYSQL_USERNAME:-}" # must be set in config
-        MYSQL_PASSWORD="${MYSQL_PASSWORD:-}" # must be set in config
-        MYSQL_HOST="${MYSQL_HOST:-localhost}"
-        MYSQL_PORT="${MYSQL_PORT:-3306}"
-        MYSQL_EXCLUDE_DBS="${MYSQL_EXCLUDE_DBS:-mysql phpmyadmin}"
         # Sync-only default from config
         SYNC_ONLY_DEFAULT="${SYNC_ONLY_DEFAULT:-false}"
 
@@ -181,21 +177,39 @@
         mkdir -p "$MYSQL_DUMP_DIR"
 
         # Get database list, excluding system DBs
-        DBS=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -e "SHOW DATABASES;" | grep -vE "Database|$(echo $MYSQL_EXCLUDE_DBS | sed 's/ /|/g')")
+        local all_dbs
+        if ! all_dbs=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -e "SHOW DATABASES;"); then
+            report_error "autoBackup: MySQL backup failed" \
+                "Cannot list MySQL databases on $MYSQL_HOST:$MYSQL_PORT, database backup skipped."
+            return
+        fi
+        DBS=$(echo "$all_dbs" | grep -vE "Database|$(echo $MYSQL_EXCLUDE_DBS | sed 's/ /|/g')")
 
+        local failed=()
         for db in $DBS; do
             echo "  Exporting database: $db"
             DB_DIR="$MYSQL_DUMP_DIR/$db"
             mkdir -p "$DB_DIR"
             # Dump schema and meta
-            mysqldump -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" --no-data --routines --events "$db" > "$DB_DIR/schema.sql"
+            mysqldump -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" --no-data --routines --events "$db" > "$DB_DIR/schema.sql" \
+                || failed+=("$db (schema)")
             # Dump each table's data separately
-            TABLES=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -D "$db" -e "SHOW TABLES;" | awk 'NR>1')
+            if ! TABLES=$(mysql -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" -D "$db" -e "SHOW TABLES;"); then
+                failed+=("$db (table list)")
+                continue
+            fi
+            TABLES=$(echo "$TABLES" | awk 'NR>1')
             for tbl in $TABLES; do
                 echo "    Table: $tbl"
-                mysqldump -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" --no-create-info "$db" "$tbl" > "$DB_DIR/${tbl}.data.sql"
+                mysqldump -u"$MYSQL_USERNAME" -p"$MYSQL_PASSWORD" -h"$MYSQL_HOST" -P"$MYSQL_PORT" --no-create-info "$db" "$tbl" > "$DB_DIR/${tbl}.data.sql" \
+                    || failed+=("$db.$tbl")
             done
         done
+
+        if [ ${#failed[@]} -gt 0 ]; then
+            report_error "autoBackup: MySQL backup failed" \
+                "MySQL backup is incomplete, failed: $(join_list "${failed[@]}")"
+        fi
     }
 
     resolve_credentials() {
@@ -203,8 +217,8 @@
         SAMBA_PASSWORD="${CLI_PASSWORD:-$SAMBA_PASSWORD}"
 
         if [[ -z "$SAMBA_USERNAME" || -z "$SAMBA_PASSWORD" ]]; then
-            echo "Error: Samba username and password must be provided via CLI or config."
-            exit 1
+            fail_and_report "autoBackup: misconfigured" \
+                "Error: Samba username and password must be provided via CLI or config."
         fi
     }
 
@@ -222,18 +236,33 @@
     }
 
     change_to_program_dir() {
-        cd "$PROGRAM_DIR" || { echo "Cannot change directory to $PROGRAM_DIR"; exit 1; }
+        cd "$PROGRAM_DIR" || fail_and_report "autoBackup: misconfigured" "Cannot change directory to $PROGRAM_DIR"
     }
 
     copy_source_dirs() {
         echo "Copying source directories..."
+        if [ ! -f "$SOURCE_DIRS_LIST" ]; then
+            fail_and_report "autoBackup: misconfigured" "Source list not found: $SOURCE_DIRS_LIST"
+        fi
         mkdir -p "$DESTINATION_DIR"
         # The mount point and the temp dir are always excluded, regardless of the exclude list,
         # so the remote content can never be copied back to this machine.
+        local failed=() rc
         for path in $(cat "$SOURCE_DIRS_LIST"); do
             rsync -avr --exclude="$LOCAL_MOUNT_POINT" --exclude="$DESTINATION_DIR" \
                 --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
+            rc=$?
+            # 24 = some source files vanished during the transfer, harmless for a backup
+            if [ $rc -ne 0 ] && [ $rc -ne 24 ]; then
+                failed+=("$path (rsync exit $rc)")
+            fi
         done
+
+        # Continue with what could be copied: a partial backup is better than none
+        if [ ${#failed[@]} -gt 0 ]; then
+            report_error "autoBackup: copy of source directories failed" \
+                "Backup is incomplete, could not copy: $(join_list "${failed[@]}")"
+        fi
     }
 
     generate_backup_filename() {
@@ -248,7 +277,9 @@
             zip -r "$BACKUP_FILENAME" --filesync -q /dev/null
         else
             echo "Compressing backup to: $BACKUP_FILENAME"
-            (cd "$DESTINATION_DIR" && zip -r "../$BACKUP_FILENAME" .)
+            if ! (cd "$DESTINATION_DIR" && zip -r "../$BACKUP_FILENAME" .); then
+                fail_and_report "autoBackup: compression failed" "Cannot create backup archive $BACKUP_FILENAME. Backup aborted."
+            fi
         fi
     }
 
@@ -266,9 +297,10 @@
         printf '%s' "$s"
     }
 
-    # Sends an error event to Sentry (SENTRY_DSN). Uses sentry-cli if installed, otherwise curl.
+    # Sends an event to Sentry (SENTRY_DSN). Uses sentry-cli if installed, otherwise curl.
+    # Level: fatal, error (default), warning, info
     send_to_sentry() {
-        local subject="$1" body="$2"
+        local subject="$1" body="$2" level="${3:-error}"
 
         if [[ -z "$SENTRY_DSN" ]]; then
             log_msg "Sentry: SENTRY_DSN not set, event not sent."
@@ -277,7 +309,7 @@
 
         if command -v sentry-cli >/dev/null 2>&1; then
             # --no-environ: do not upload environment variables with the event
-            if SENTRY_DSN="$SENTRY_DSN" sentry-cli send-event --no-environ -l error -m "$subject: $body" \
+            if SENTRY_DSN="$SENTRY_DSN" sentry-cli send-event --no-environ -l "$level" -m "$subject: $body" \
                 -E "$SENTRY_ENVIRONMENT" -t "subject:$subject" -f "$subject" >/dev/null 2>&1; then
                 log_msg "Sentry: event sent (sentry-cli)."
                 return 0
@@ -306,8 +338,8 @@
         sent_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
         local event
-        event=$(printf '{"event_id":"%s","timestamp":%s,"level":"error","platform":"other","logger":"autoBackup","server_name":"%s","environment":"%s","message":{"formatted":"%s"},"fingerprint":["%s"],"tags":{"subject":"%s"}}' \
-            "$event_id" "$ts" "$(json_escape "$(hostname)")" "$(json_escape "$SENTRY_ENVIRONMENT")" \
+        event=$(printf '{"event_id":"%s","timestamp":%s,"level":"%s","platform":"other","logger":"autoBackup","server_name":"%s","environment":"%s","message":{"formatted":"%s"},"fingerprint":["%s"],"tags":{"subject":"%s"}}' \
+            "$event_id" "$ts" "$(json_escape "$level")" "$(json_escape "$(hostname)")" "$(json_escape "$SENTRY_ENVIRONMENT")" \
             "$(json_escape "$subject: $body")" "$(json_escape "$subject")" "$(json_escape "$subject")")
 
         local envelope
@@ -329,12 +361,26 @@
         ping -c 1 -W 2 "$WOL_PING_IP" >/dev/null 2>&1
     }
 
+    # Logs the error and reports it to Sentry, but lets the script continue
+    report_error() {
+        local subject="$1" body="$2" level="${3:-error}"
+        log_msg "$body"
+        send_to_sentry "$subject" "$body" "$level"
+    }
+
     # Logs the error, reports it to Sentry and exits
     fail_and_report() {
-        local subject="$1" body="$2"
-        log_msg "$body"
-        send_to_sentry "$subject" "$body"
+        report_error "$1" "$2" "${3:-error}"
+        # Tells cleanup_on_exit that this exit is already reported
+        SENTRY_REPORTED=true
         exit 1
+    }
+
+    # Joins the arguments with "; "
+    join_list() {
+        local out
+        out="$(printf '%s; ' "$@")"
+        printf '%s' "${out%; }"
     }
 
     send_wol_packet() {
@@ -434,7 +480,10 @@ PY
             rsync -avhzn --delete "$archivedFile" "$mountPoint"
         else
             echo -e "\nPerforming actual sync:"
-            rsync -avhz --delete "$archivedFile" "$mountPoint"
+            if ! rsync -avhz --delete "$archivedFile" "$mountPoint"; then
+                fail_and_report "autoBackup: upload failed" \
+                    "Cannot copy $BACKUP_FILENAME to //$SAMBA_SERVER$SAMBA_FOLDER. Backup aborted."
+            fi
         fi
     }
 
@@ -445,7 +494,7 @@ PY
         if [ $? -eq 0 ]; then
             rmdir "$LOCAL_MOUNT_POINT"
         else
-            echo "Failed to unmount $LOCAL_MOUNT_POINT"
+            report_error "autoBackup: unmount failed" "Failed to unmount $LOCAL_MOUNT_POINT" warning
         fi
     }
 
@@ -459,19 +508,31 @@ PY
         done
 
         if mountpoint -q "$LOCAL_MOUNT_POINT"; then
-            echo "Cannot unmount $LOCAL_MOUNT_POINT, aborting."
-            exit 1
+            fail_and_report "autoBackup: stale mount" \
+                "Cannot unmount $LOCAL_MOUNT_POINT left over from a previous run, aborting."
         fi
     }
 
     # Only one instance may run at a time. The kernel releases the lock when the process ends,
     # so an interrupted run cannot leave a stale lock behind.
     acquire_lock() {
-        exec 9>"$LOCK_FILE" || { echo "Cannot open lock file: $LOCK_FILE"; exit 1; }
-        flock -n 9 || { echo "Another backup is already running, exiting."; exit 1; }
+        exec 9>"$LOCK_FILE" || fail_and_report "autoBackup: lock failed" "Cannot open lock file: $LOCK_FILE"
+        # A still running previous backup usually means it hangs, so this is worth a warning
+        flock -n 9 || fail_and_report "autoBackup: already running" \
+            "Another backup is already running, exiting." warning
     }
 
     cleanup_on_exit() {
+        local rc=$?
+
+        # Catch-all: any failure that was not reported explicitly (e.g. an unexpected exit or a signal)
+        if [ $rc -ne 0 ] && ! $SENTRY_REPORTED; then
+            case $rc in
+                130|143) report_error "autoBackup: interrupted" "Backup was interrupted by a signal (exit $rc)." warning ;;
+                *) report_error "autoBackup: failed" "Backup script exited with code $rc." ;;
+            esac
+        fi
+
         if mountpoint -q "$LOCAL_MOUNT_POINT"; then
             unmount_remote_storage
         fi
@@ -498,6 +559,9 @@ PY
 
     parse_arguments "$@"
 
+    # Config is loaded first (it only reads values) so that lock errors can be reported to Sentry
+    load_config
+
     # The lock must be held before the trap is set, so an instance that did not get it touches nothing
     acquire_lock
 
@@ -507,7 +571,6 @@ PY
     trap 'exit 143' TERM
 
     print_start_info
-    load_config
     resolve_credentials
     ensure_remote_unmounted
 
