@@ -222,6 +222,7 @@
             rmdir "$LOCAL_MOUNT_POINT"
         else
             echo "Failed to unmount $LOCAL_MOUNT_POINT"
+            return 1
         fi
     }
 
@@ -263,10 +264,11 @@
     }
 
     print_done() {
+        local status="$1"
         local timestamp
         timestamp=$(date +"%Y-%m-%d %H:%M:%S")
         echo "=============================================="
-        echo "Backup process completed at ${timestamp}"
+        echo "Backup process completed${status} at ${timestamp}"
         echo "=============================================="
     }
 
@@ -290,7 +292,7 @@
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
         mount_remote_storage
-        unmount_remote_storage
+        unmount_remote_storage || exit 1
         echo "Samba/CIFS connection test completed."
         exit 0
     fi
@@ -304,7 +306,12 @@
     compress_backup
     mount_remote_storage
     copy_backup_to_remote
-    unmount_remote_storage
+    # The backup is already on the share at this point, so a failed unmount must not skip the local cleanup
+    if ! unmount_remote_storage; then
+        cleanup_local_backup
+        print_done " with errors ($LOCAL_MOUNT_POINT is still mounted)"
+        exit 1
+    fi
     cleanup_local_backup
     print_done
 
