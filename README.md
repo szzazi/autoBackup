@@ -170,6 +170,63 @@ If you set `MYSQL_BACKUP_ENABLED="false"`, no database backup will be performed.
 
 ---
 
+## ⏰ Optional Wake-on-LAN
+
+If the backup target is not always on, the script can wake it before mounting:
+
+1. Pings `WOL_PING_IP` (defaults to `SAMBA_SERVER`).
+2. If there is no answer, sends a WOL magic packet to `WOL_MAC`.
+3. Keeps pinging until the host answers or `WOL_WAKEUP_TIMEOUT_SEC` (real seconds) expires.
+4. On timeout, reports an error to Sentry and exits.
+
+The packet is sent with `etherwake` (only if `WOL_INTERFACE` is set, needs root), otherwise `wakeonlan`, otherwise a `python3` broadcast.
+
+Since a freshly woken host may answer ping before the Samba share is ready, the mount is retried `MOUNT_RETRIES` times with `MOUNT_RETRY_DELAY_SEC` seconds between attempts. If every attempt fails, an error is reported to Sentry as well.
+
+```bash
+WOL_ENABLED="true"
+WOL_MAC="AA:BB:CC:DD:EE:FF"
+WOL_PING_IP=""              # empty = SAMBA_SERVER
+WOL_WAKEUP_TIMEOUT_SEC="120"
+WOL_INTERFACE=""            # e.g. enp3s0 to use etherwake
+MOUNT_RETRIES="5"
+MOUNT_RETRY_DELAY_SEC="10"
+```
+
+CLI overrides: `--wol --wol-mac <mac> --wol-ping-ip <ip> --wol-timeout <sec>`.
+
+---
+
+## 🚨 Optional Sentry Error Reporting
+
+Failures are sent to [Sentry](https://sentry.io) as events, grouped by type:
+
+| Event | Level | Script |
+| --- | --- | --- |
+| Missing credentials / program dir / source list, WOL misconfigured | error | aborts |
+| Remote host did not wake up, WOL send failed | error | aborts |
+| Mount failed (after retries) | error | aborts |
+| Compression failed, upload to the share failed | error | aborts |
+| Some source directories could not be copied | error | continues (partial backup) |
+| Some MySQL databases/tables could not be dumped | error | continues (partial backup) |
+| Unmount failed | warning | continues |
+| Interrupted (Ctrl+C / SIGTERM) | warning | aborts |
+| Any other non-zero exit | error | — |
+
+When the script aborts, the share is unmounted and the local temporary files are removed.
+A missing config file cannot be reported, since the DSN is read from it.
+
+Set the DSN from *Project Settings → Client Keys (DSN)*:
+
+```bash
+SENTRY_DSN="https://<public_key>@o000000.ingest.sentry.io/0000000"
+SENTRY_ENVIRONMENT="production"
+```
+
+If `sentry-cli` is installed it is used, otherwise the event is posted with `curl`. Leave `SENTRY_DSN` empty to disable reporting (errors are still logged).
+
+---
+
 ## 🆘 Troubleshooting
 
 - ✅ Make sure `rsync`, `zip`, and `cifs-utils` are installed.
