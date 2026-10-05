@@ -55,7 +55,67 @@ prompt_user_input() {
 
     read -rsp "Samba password: " val
     echo ""
-    config_values[SAMBA_PASSWORD]="$val"
+    config_values[SAMBA_PASSWORD]="${val:-${config_values[SAMBA_PASSWORD]:-}}"
+
+    # MySQL settings
+    default_mysql_enabled="${config_values[MYSQL_BACKUP_ENABLED]:-false}"
+    read -e -i "$default_mysql_enabled" -p "Enable MySQL database backup? (true/false): " val
+    config_values[MYSQL_BACKUP_ENABLED]="${val:-$default_mysql_enabled}"
+
+    if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
+        default_mysql_user="${config_values[MYSQL_USERNAME]:-}"
+        read -e -i "$default_mysql_user" -p "MySQL username for backup: " val
+        config_values[MYSQL_USERNAME]="${val:-$default_mysql_user}"
+
+        read -rsp "MySQL password for backup (press enter to keep existing): " val
+        echo ""
+        config_values[MYSQL_PASSWORD]="${val:-${config_values[MYSQL_PASSWORD]:-}}"
+
+        default_mysql_host="${config_values[MYSQL_HOST]:-localhost}"
+        read -e -i "$default_mysql_host" -p "MySQL host: " val
+        config_values[MYSQL_HOST]="${val:-$default_mysql_host}"
+
+        default_mysql_port="${config_values[MYSQL_PORT]:-3306}"
+        read -e -i "$default_mysql_port" -p "MySQL port: " val
+        config_values[MYSQL_PORT]="${val:-$default_mysql_port}"
+
+        default_mysql_exclude="${config_values[MYSQL_EXCLUDE_DBS]:-mysql phpmyadmin}"
+        read -e -i "$default_mysql_exclude" -p "Excluded databases (space-separated): " val
+        config_values[MYSQL_EXCLUDE_DBS]="${val:-$default_mysql_exclude}"
+    fi
+
+    # Sync-only default
+    default_sync_only="${config_values[SYNC_ONLY_DEFAULT]:-false}"
+    read -e -i "$default_sync_only" -p "Set sync-only by default? (true/false): " val
+    config_values[SYNC_ONLY_DEFAULT]="${val:-$default_sync_only}"
+
+    # Wake-on-LAN settings
+    default_wol_enabled="${config_values[WOL_ENABLED]:-false}"
+    read -e -i "$default_wol_enabled" -p "Enable Wake-on-LAN before mounting? (true/false): " val
+    config_values[WOL_ENABLED]="${val:-$default_wol_enabled}"
+
+    if [[ "${config_values[WOL_ENABLED]}" == "true" ]]; then
+        default_wol_mac="${config_values[WOL_MAC]:-}"
+        read -e -i "$default_wol_mac" -p "MAC address of the remote machine: " val
+        config_values[WOL_MAC]="${val:-$default_wol_mac}"
+
+        default_wol_ping_ip="${config_values[WOL_PING_IP]:-${config_values[SAMBA_SERVER]}}"
+        read -e -i "$default_wol_ping_ip" -p "IP to ping for availability: " val
+        config_values[WOL_PING_IP]="${val:-$default_wol_ping_ip}"
+
+        default_wol_timeout="${config_values[WOL_WAKEUP_TIMEOUT_SEC]:-120}"
+        read -e -i "$default_wol_timeout" -p "Max seconds to wait for wake-up: " val
+        config_values[WOL_WAKEUP_TIMEOUT_SEC]="${val:-$default_wol_timeout}"
+
+        default_wol_interface="${config_values[WOL_INTERFACE]:-}"
+        read -e -i "$default_wol_interface" -p "Network interface for etherwake (empty = auto): " val
+        config_values[WOL_INTERFACE]="${val:-$default_wol_interface}"
+    fi
+
+    # Sentry error reporting
+    default_sentry_dsn="${config_values[SENTRY_DSN]:-}"
+    read -e -i "$default_sentry_dsn" -p "Sentry DSN for error reporting (empty = disabled): " val
+    config_values[SENTRY_DSN]="${val:-$default_sentry_dsn}"
 }
 
 write_config() {

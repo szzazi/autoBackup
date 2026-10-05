@@ -76,6 +76,35 @@ SAMBA_FOLDER="/backupTarget"
 # SAMBA_VERSION: Samba protocol version to use for mounting. Examples: 1.0 (old), 2.0, 3.0 (recommended if supported by server)
 SAMBA_VERSION="1.0"  # See above: Samba protocol version
 
+# === WAKE-ON-LAN (OPTIONAL) ===
+# If enabled, the remote is pinged before mounting. If it does not answer,
+# a WOL magic packet is sent and pinging continues until it answers or the
+# timeout expires (then an error is reported to Sentry and the script exits).
+# CLI: --wol --wol-mac <mac> --wol-ping-ip <ip> --wol-timeout <sec>
+WOL_ENABLED="false"
+# MAC address of the remote machine (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)
+WOL_MAC="AA:BB:CC:DD:EE:FF"
+# IP to ping for availability. If empty, SAMBA_SERVER is used.
+WOL_PING_IP=""
+# Max seconds to wait (real time) for the host to answer after the WOL packet
+WOL_WAKEUP_TIMEOUT_SEC="120"
+# Optional network interface (e.g. enp3s0). If set and etherwake is installed,
+# etherwake is used on this interface (needs root). Otherwise wakeonlan or python3 broadcast.
+WOL_INTERFACE=""
+
+# === MOUNT RETRY ===
+# A freshly woken host may answer ping before the Samba share is ready,
+# so the mount is retried. After the last failure an error is reported to Sentry.
+MOUNT_RETRIES="5"
+MOUNT_RETRY_DELAY_SEC="10"
+
+# === SENTRY ERROR REPORTING (OPTIONAL) ===
+# Failures (WOL wake-up timeout, WOL misconfiguration, mount failure) are sent to Sentry.
+# Get the DSN from Sentry: Project Settings > Client Keys (DSN). Leave empty to disable.
+# Uses sentry-cli if installed, otherwise curl.
+SENTRY_DSN=""
+SENTRY_ENVIRONMENT="production"
+
 # === Optional: credentials (can be overridden by CLI) ===
 
 # Samba username to access the shared folder.
