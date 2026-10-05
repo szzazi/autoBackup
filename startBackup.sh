@@ -216,12 +216,13 @@
 
     unmount_remote_storage() {
         echo "Unmounting network storage..."
-        umount "$LOCAL_MOUNT_POINT"
-
-        if [ $? -eq 0 ]; then
-            rmdir "$LOCAL_MOUNT_POINT"
-        else
+        if ! umount "$LOCAL_MOUNT_POINT"; then
             echo "Failed to unmount $LOCAL_MOUNT_POINT"
+            return 1
+        fi
+
+        if ! rmdir "$LOCAL_MOUNT_POINT"; then
+            echo "Unmounted, but failed to remove $LOCAL_MOUNT_POINT"
             return 1
         fi
     }
@@ -309,7 +310,7 @@
     # The backup is already on the share at this point, so a failed unmount must not skip the local cleanup
     if ! unmount_remote_storage; then
         cleanup_local_backup
-        print_done " with errors ($LOCAL_MOUNT_POINT is still mounted)"
+        print_done " with errors (unmount of $LOCAL_MOUNT_POINT failed)"
         exit 1
     fi
     cleanup_local_backup
