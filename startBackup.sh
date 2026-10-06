@@ -1,4 +1,4 @@
-    #!/bin/bash
+#!/bin/bash
     #########################################################
     # Automatic backup script with optional dry-run support
     # - Uses external config (with override)
@@ -6,10 +6,11 @@
     # - Supports dry-run mode with --dry-run switch
     #########################################################
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
     CONFIG_FILE="$SCRIPT_DIR/config.conf"
     DESTINATION_DIR="$SCRIPT_DIR/temp"
     LOCAL_MOUNT_POINT="$SCRIPT_DIR/remote"
+    LOCK_FILE="$SCRIPT_DIR/.autoBackup.lock"
 
     # Optional CLI overrides
     CLI_USERNAME=""
@@ -151,7 +152,7 @@
         echo "=============================================="
         echo "Start auto backup script at ${timestamp}"
         echo "Simulation mode: $DRY_RUN"
-        echo "Working directory: \"$PWD\""
+        echo "Working directory: \"$SCRIPT_DIR\""
         echo "=============================================="
         echo "Directory files:"
         ls -la
@@ -226,8 +227,11 @@
     copy_source_dirs() {
         echo "Copying source directories..."
         mkdir -p "$DESTINATION_DIR"
+        # The mount point and the temp dir are always excluded, regardless of the exclude list,
+        # so the remote content can never be copied back to this machine.
         for path in $(cat "$SOURCE_DIRS_LIST"); do
-            rsync -avr --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
+            rsync -avr --exclude="$LOCAL_MOUNT_POINT" --exclude="$DESTINATION_DIR" \
+                --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
         done
     }
 
@@ -283,12 +287,54 @@
 
     unmount_remote_storage() {
         echo "Unmounting network storage..."
-        umount "$LOCAL_MOUNT_POINT"
-
-        if [ $? -eq 0 ]; then
-            rmdir "$LOCAL_MOUNT_POINT"
-        else
+        if ! umount "$LOCAL_MOUNT_POINT"; then
             echo "Failed to unmount $LOCAL_MOUNT_POINT"
+            return 1
+        fi
+
+        if ! rmdir "$LOCAL_MOUNT_POINT"; then
+            echo "Unmounted, but failed to remove $LOCAL_MOUNT_POINT"
+            return 1
+        fi
+    }
+
+    # A mount left over from an interrupted run would be readable by copy_source_dirs
+    ensure_remote_unmounted() {
+        local attempt
+        for attempt in {1..10}; do
+            mountpoint -q "$LOCAL_MOUNT_POINT" || return 0
+            echo "\"$LOCAL_MOUNT_POINT\" is still mounted from a previous run, unmounting (attempt $attempt/10)..."
+            umount "$LOCAL_MOUNT_POINT" || sleep 1
+        done
+
+        if mountpoint -q "$LOCAL_MOUNT_POINT"; then
+            echo "Cannot unmount $LOCAL_MOUNT_POINT, aborting."
+            exit 1
+        fi
+    }
+
+    # Only one instance may run at a time. The kernel releases the lock when the process ends,
+    # so an interrupted run cannot leave a stale lock behind.
+    acquire_lock() {
+        exec 9>"$LOCK_FILE" || { echo "Cannot open lock file: $LOCK_FILE"; exit 1; }
+        flock -n 9 || { echo "Another backup is already running, exiting."; exit 1; }
+    }
+
+    # A run killed without the trap firing (SIGKILL, power loss) can leave a populated temp dir,
+    # and rsync without --delete would carry its stale files into this backup
+    clear_stale_destination_dir() {
+        if [ -d "$DESTINATION_DIR" ] && [ -n "$(ls -A "$DESTINATION_DIR")" ]; then
+            echo "\"$DESTINATION_DIR\" contains leftovers from a previous run, clearing it..."
+            rm -rf -- "${DESTINATION_DIR:?}"/* "${DESTINATION_DIR:?}"/.[!.]* "${DESTINATION_DIR:?}"/..?*
+        fi
+    }
+
+    cleanup_on_exit() {
+        if mountpoint -q "$LOCAL_MOUNT_POINT"; then
+            unmount_remote_storage
+        fi
+        if [ -d "$DESTINATION_DIR" ] || { [ -n "$BACKUP_FILENAME" ] && [ -f "$BACKUP_FILENAME" ]; }; then
+            cleanup_local_backup
         fi
     }
 
@@ -299,18 +345,31 @@
     }
 
     print_done() {
+        local status="$1"
         local timestamp
         timestamp=$(date +"%Y-%m-%d %H:%M:%S")
         echo "=============================================="
-        echo "Backup process completed at ${timestamp}"
+        echo "Backup process completed${status} at ${timestamp}"
         echo "=============================================="
     }
 
     # === Main sequence ===
 
     parse_arguments "$@"
+
+    # The lock must be held before the trap is set, so an instance that did not get it touches nothing
+    acquire_lock
+    clear_stale_destination_dir
+
+    # Never leave the share mounted or local leftovers behind, even if the script fails or is interrupted
+    trap cleanup_on_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    print_start_info
     load_config
     resolve_credentials
+    ensure_remote_unmounted
 
     # If config sets sync-only by default and CLI didn't enable/disable, enable it
     if [[ "$SYNC_ONLY" != "true" && "$SYNC_ONLY_DEFAULT" == "true" ]]; then
@@ -327,12 +386,11 @@
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
         mount_remote_storage
-        unmount_remote_storage
+        unmount_remote_storage || exit 1
         echo "Samba/CIFS connection test completed."
         exit 0
     fi
 
-    print_start_info
     change_to_program_dir
     copy_source_dirs
     if [ "$MYSQL_BACKUP_ENABLED" = "true" ]; then
@@ -342,7 +400,12 @@
     compress_backup
     mount_remote_storage
     copy_backup_to_remote
-    unmount_remote_storage
+    # The backup is already on the share at this point, so a failed unmount must not skip the local cleanup
+    if ! unmount_remote_storage; then
+        cleanup_local_backup
+        print_done " with errors (unmount of $LOCAL_MOUNT_POINT failed)"
+        exit 1
+    fi
     cleanup_local_backup
     print_done
 
