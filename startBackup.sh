@@ -289,6 +289,9 @@
     load_config
     resolve_credentials
     ensure_remote_unmounted
+    # A run killed without the trap firing (SIGKILL, power loss) can leave a populated temp dir,
+    # and rsync without --delete would carry its stale files into this backup
+    rm -rf -- "$DESTINATION_DIR"
 
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
