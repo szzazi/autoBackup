@@ -249,6 +249,15 @@
         flock -n 9 || { echo "Another backup is already running, exiting."; exit 1; }
     }
 
+    # A run killed without the trap firing (SIGKILL, power loss) can leave a populated temp dir,
+    # and rsync without --delete would carry its stale files into this backup
+    clear_stale_destination_dir() {
+        if [ -d "$DESTINATION_DIR" ] && [ -n "$(ls -A "$DESTINATION_DIR")" ]; then
+            echo "\"$DESTINATION_DIR\" contains leftovers from a previous run, clearing it..."
+            rm -rf -- "${DESTINATION_DIR:?}"/* "${DESTINATION_DIR:?}"/.[!.]* "${DESTINATION_DIR:?}"/..?*
+        fi
+    }
+
     cleanup_on_exit() {
         if mountpoint -q "$LOCAL_MOUNT_POINT"; then
             unmount_remote_storage
@@ -279,6 +288,7 @@
 
     # The lock must be held before the trap is set, so an instance that did not get it touches nothing
     acquire_lock
+    clear_stale_destination_dir
 
     # Never leave the share mounted or local leftovers behind, even if the script fails or is interrupted
     trap cleanup_on_exit EXIT
@@ -289,9 +299,6 @@
     load_config
     resolve_credentials
     ensure_remote_unmounted
-    # A run killed without the trap firing (SIGKILL, power loss) can leave a populated temp dir,
-    # and rsync without --delete would carry its stale files into this backup
-    rm -rf -- "$DESTINATION_DIR"
 
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
