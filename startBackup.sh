@@ -314,32 +314,43 @@ sync_specified_folder() {
 
 # Mirrors one local file or folder to the same absolute path under the share,
 # e.g. /var/www -> <share>/var/www/. Files deleted locally are deleted on the share too.
+#
+# Two forms of the path are used:
+#   abspath   - "." and ".." resolved, symlinks kept: the destination is built from this,
+#               so it is always the path as written in the source list
+#   real_path - symlinks resolved too: this is what rsync actually reads, so the checks
+#               against the mount point use it (a symlink like /data/app -> /opt/autoBackup
+#               would otherwise smuggle the mounted share into the source)
+# Symlinks deeper inside a source are copied as links (rsync -a without -L), not followed,
+# so only the source path itself needs these checks.
 sync_path_to_remote() {
-    local abspath prefix relpath src dest
+    local abspath real_path real_prefix mount_real relpath src dest
     local rsync_opts=(-avh --delete --exclude-from="$EXCLUDE_LIST")
     $DRY_RUN && rsync_opts+=(-n)
 
-    # Resolve "." and ".." (symlinks are kept), so the destination built from
-    # the path can never point outside the mount point
-    if ! abspath=$(realpath -s -e -- "$1"); then
+    if ! abspath=$(realpath -s -e -- "$1") || ! real_path=$(realpath -e -- "$1"); then
         echo "Error: cannot resolve path: $1"
         return 1
     fi
-    prefix="${abspath%/}/"
+    real_prefix="${real_path%/}/"
+    mount_real=$(realpath -m -- "$LOCAL_MOUNT_POINT")
 
-    if [[ "$prefix" == "$LOCAL_MOUNT_POINT/"* ]]; then
-        echo "Error: refusing to sync a path inside the mount point: $abspath"
+    # The source is (or points into) the share itself
+    if [[ "$real_prefix" == "$mount_real/"* ]]; then
+        echo "Error: refusing to sync a path inside the mount point: $abspath -> $real_path"
         return 1
     fi
 
     relpath="${abspath#/}"
     if [ -d "$abspath" ]; then
         # The trailing slash makes rsync copy the folder's content into dest
-        src="$prefix"
+        # (and follow the source itself if it is a symlink to a folder)
+        src="${abspath%/}/"
         dest="$LOCAL_MOUNT_POINT/$relpath/"
-        # A source that contains the mount point (e.g. "/") would copy the share into itself
-        if [[ "$LOCAL_MOUNT_POINT" == "$prefix"* ]]; then
-            rsync_opts+=(--exclude="/${LOCAL_MOUNT_POINT#"$prefix"}/")
+        # A source that contains the mount point (e.g. "/") would copy the share into itself.
+        # The exclude is relative to the folder rsync really reads, hence real_prefix.
+        if [[ "$mount_real" == "$real_prefix"* ]]; then
+            rsync_opts+=(--exclude="/${mount_real#"$real_prefix"}/")
         fi
     else
         src="$abspath"

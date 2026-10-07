@@ -99,7 +99,8 @@ SAMBA_PASSWORD="yourStrongPassword"
 
 ###########################
 # Notes:
-# - Do not enclose values in quotes unless necessary (as above).
+# - This file is read as a shell script. Inside "double quotes" $, ", ` and \ are special;
+#   put values containing them (e.g. passwords) in 'single quotes'. configure.sh does this itself.
 # - Avoid trailing slashes in SAMBA_FOLDER.
 # - Do NOT use credentials file (this config works without it).
 # - Any CLI parameter (user/pass/config) overrides these.

@@ -337,10 +337,11 @@ sudo ./configure.sh
 
 The installer:
 
-1. Asks for the config file path (default: `./config.conf`); if it exists, its current values are offered as defaults.
+1. Asks for the config file path (default: `config.conf` next to `configure.sh`); if it exists, its current values are offered as defaults.
 2. Checks for and, if needed, installs the `rsync`, `zip`, `cifs-utils` packages.
 3. Prompts for the settings: program directory, list files, Samba details, MySQL (optional), `SYNC_ONLY_DEFAULT`. Pressing Enter at a password prompt keeps the existing one.
 4. Writes `config.conf` from the `config.conf.example` template (comments are preserved), with `600` permissions.
+   The values are written in single quotes (e.g. `SAMBA_PASSWORD='pa$$word'`), so passwords containing `$`, `"`, `` ` `` or `\` are stored unchanged.
 5. Tests the Samba connection.
 6. If they do not exist yet, creates `sourceList.txt` and `excludeList.txt` from the examples and opens them for editing.
 7. Optionally adds a cron entry (daily / every 3rd day / weekly at 01:06, or a custom expression):
@@ -359,9 +360,10 @@ The installer can be re-run at any time to change settings, or `config.conf` can
 
 - **One instance at a time:** an `flock` lock is held on `.autoBackup.lock`; if a backup is already running, the new instance exits ("Another backup is already running"). The kernel releases the lock, so an interrupted run never leaves a stale lock behind.
 - **Cleanup on exit:** on errors, `Ctrl+C` (INT) or `kill` (TERM), the share is still unmounted and local temporary files are removed.
-- **Leftovers from previous runs:** if `remote/` is still mounted from an earlier run, the script unmounts it at startup (up to 10 attempts); if `temp/` is not empty, it is cleared.
+- **Leftovers from previous runs:** if `remote/` is still mounted from an earlier run, the script unmounts it at startup (up to 10 attempts); if `temp/` is not empty, it is cleared; incomplete `.zip.part` files in `zip/` are deleted.
 - **Read-only dry run:** during a simulation the share is mounted `ro`.
-- **No self-copying:** the mount point never ends up in the backup.
+- **No self-copying:** the mount point never ends up in the backup. In sync-only mode this is checked on the resolved path too,
+  so a source that is a symlink to the script folder or into the share cannot copy the share into itself.
 
 ---
 
@@ -370,7 +372,7 @@ The installer can be re-run at any time to change settings, or `config.conf` can
 | Code | Meaning |
 |---|---|
 | `0` | Successful run. |
-| `1` | Error: missing config / credentials, failed mount or unmount, another instance running, invalid or missing source in sync-only mode. |
+| `1` | Error: missing config / credentials, failed mount or unmount, another instance running, invalid or missing source in sync-only mode, ZIP could not be created or uploaded. |
 | `130` | Interrupted (`Ctrl+C`). |
 | `143` | Terminated (`SIGTERM`). |
 

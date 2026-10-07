@@ -23,27 +23,39 @@ declare -A config_values
 # Existing config
 # ======================================================
 
-# Reads KEY=value lines of an existing config into config_values.
-# Values may be "double quoted", 'single quoted' or unquoted; the quotes and a
-# trailing "# comment" are not part of the value.
+# Reads the settings of an existing config into config_values.
+# The config is sourced (in a subshell, so nothing leaks into the installer), exactly as
+# startBackup.sh does, so every value is what the backup really uses: quotes, escapes,
+# comments and references like "$PROGRAM_DIR/sourceList.txt" are all resolved by the shell.
 load_existing_config() {
-    [ -f "$CONFIG_FILE" ] || return
+    if [ ! -f "$CONFIG_FILE" ]; then
+        return
+    fi
 
-    local line key rest value
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        [[ "$line" =~ ^([A-Za-z0-9_]+)=(.*)$ ]] || continue
-        key="${BASH_REMATCH[1]}"
-        rest="${BASH_REMATCH[2]}"
+    # The names of the settings: every KEY= at the start of a line
+    local keys
+    keys=$(grep -oE '^[A-Za-z0-9_]+=' "$CONFIG_FILE" | tr -d '=' | sort -u)
 
-        if [[ "$rest" =~ ^\"([^\"]*)\" || "$rest" =~ ^\'([^\']*)\' ]]; then
-            value="${BASH_REMATCH[1]}"
-        else
-            value="${rest%%#*}"                       # drop the comment
-            value="${value%"${value##*[![:space:]]}"}" # drop trailing whitespace
-        fi
+    # The subshell prints KEY\0VALUE\0 pairs; \0 cannot occur in a value, so any value is safe
+    local key value
+    while IFS= read -r -d '' key && IFS= read -r -d '' value; do
         config_values[$key]="$value"
-    done < "$CONFIG_FILE"
+    done < <(
+        source "$CONFIG_FILE" >/dev/null 2>&1
+        for key in $keys; do
+            if [ -n "${!key+set}" ]; then
+                printf '%s\0%s\0' "$key" "${!key}"
+            fi
+        done
+    )
+}
+
+# Prints a value in single quotes, so the shell takes it literally when the config is sourced:
+# $, ", `, \ and spaces need no escaping there, only a ' itself, which is written as '\''
+#   e.g.  pa$$w"rd  ->  'pa$$w"rd'     it's  ->  'it'\''s'
+shell_quote() {
+    local escaped="${1//\'/\'\\\'\'}"
+    printf "'%s'" "$escaped"
 }
 
 
@@ -137,7 +149,9 @@ prompt_user_input() {
 # ======================================================
 
 # Rebuilds the config from the example: comments and other lines are copied as they are,
-# KEY=value lines get the collected value (or keep the example value if there is none)
+# KEY=value lines get the collected value (or keep the example value if there is none).
+# The collected values are written with shell_quote, so a password containing $, " or `
+# is read back unchanged by startBackup.sh.
 write_config() {
     if [ ! -f "$CONFIG_EXAMPLE" ]; then
         echo "Missing $CONFIG_EXAMPLE template!"
@@ -152,7 +166,7 @@ write_config() {
         if [[ "$line" =~ ^([A-Za-z0-9_]+)= ]]; then
             key="${BASH_REMATCH[1]}"
             if [[ -n "${config_values[$key]}" ]]; then
-                echo "$key=\"${config_values[$key]}\"" >> "$CONFIG_FILE"
+                echo "$key=$(shell_quote "${config_values[$key]}")" >> "$CONFIG_FILE"
                 continue
             fi
         fi
