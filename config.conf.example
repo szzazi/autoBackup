@@ -61,7 +61,7 @@ MYSQL_PORT="3306"
 MYSQL_EXCLUDE_DBS="mysql phpmyadmin"
 # === SYNC-ONLY DEFAULT ===
 # If set to "true", the script will run in sync-only mode by default (no zip),
-# using paths from SOURCE_DIRS_LIST. CLI --sync-only still overrides this.
+# using paths from SOURCE_DIRS_LIST. CLI --sync-only / --no-sync-only override this.
 SYNC_ONLY_DEFAULT="false"
 
 # === SAMBA/CIFS SETTINGS ===
