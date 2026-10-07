@@ -11,12 +11,19 @@ declare -A config_values
 
 load_existing_config() {
     if [ -f "$CONFIG_FILE" ]; then
-        while IFS= read -r line; do
-            if [[ "$line" =~ ^([A-Za-z0-9_]+)="?(.*)"?$ ]]; then
-                key="${BASH_REMATCH[1]}"
-                value="${BASH_REMATCH[2]}"
-                config_values[$key]="$value"
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            [[ "$line" =~ ^([A-Za-z0-9_]+)=(.*)$ ]] || continue
+            key="${BASH_REMATCH[1]}"
+            rest="${BASH_REMATCH[2]}"
+            # Take the value from inside the quotes, so a trailing quote or "# comment" is not kept
+            if [[ "$rest" =~ ^\"([^\"]*)\" || "$rest" =~ ^\'([^\']*)\' ]]; then
+                value="${BASH_REMATCH[1]}"
+            else
+                value="${rest%%#*}"
+                value="${value%"${value##*[![:space:]]}"}"
             fi
+            config_values[$key]="$value"
         done < "$CONFIG_FILE"
     fi
 }
@@ -239,7 +246,9 @@ setup_cron_job() {
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     script_path="$SCRIPT_DIR/startBackup.sh"
     log_path="/var/log/autoBackup.log"
-    cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
+    # Without --config the script would always read config.conf next to itself
+    config_path="$(realpath -- "$CONFIG_FILE")"
+    cron_cmd="$cron_expr \"$script_path\" --config \"$config_path\" >>$log_path 2>&1"
 
     current_cron=$(crontab -l 2>/dev/null || true)
 

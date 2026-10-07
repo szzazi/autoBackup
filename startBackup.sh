@@ -17,11 +17,12 @@
     CLI_PASSWORD=""
     DRY_RUN=false
     TEST_SAMBA=false
-    SYNC_ONLY=false
+    # Empty means "not set on the CLI", so SYNC_ONLY_DEFAULT from the config decides
+    SYNC_ONLY=""
     SYNC_PATH=""
 
     print_help() {
-        echo "Usage: $0 [--config <path>] [--user <username>] [--pass <password>] [--dry-run] [--help]"
+        echo "Usage: $0 [--config <path>] [--user <username>] [--pass <password>] [--dry-run] [--test-samba] [--sync-only [<path>] | --no-sync-only] [--help]"
         echo ""
         echo "Options:"
         echo "  -c, --config <path>     Path to config file"
@@ -29,8 +30,9 @@
         echo "      --pass <password>   Samba password (overrides config)"
         echo "      --dry-run           Run full flow in simulation mode (no actual copy)"
         echo "      --test-samba        Only test Samba/CIFS connection (mount & unmount)"
-    echo "      --sync-only <path>   Sync the specified local folder to the remote share (no zip)."
-    echo "                           If no <path> is provided, the script will read paths from SOURCE_DIRS_LIST in the config and sync each listed path."
+        echo "      --sync-only [<path>] Sync the specified local folder to the remote share (no zip)."
+        echo "                          Without <path>, every path listed in SOURCE_DIRS_LIST is synced."
+        echo "      --no-sync-only      Run the normal zip backup even if SYNC_ONLY_DEFAULT=\"true\" in the config"
         echo "  -h, --help              Show this help message"
         exit 0
     }
@@ -67,6 +69,11 @@
                     else
                         shift
                     fi
+                    ;;
+                --no-sync-only)
+                    SYNC_ONLY=false
+                    SYNC_PATH=""
+                    shift
                     ;;
                 -h|--help)
                     print_help
@@ -163,9 +170,11 @@
         cd "$PROGRAM_DIR" || { echo "Cannot change directory to $PROGRAM_DIR"; exit 1; }
     }
 
+    # Returns non-zero if any source was missing or failed to sync, so a broken source
+    # (and the stale copy it leaves on the share) is never reported as a successful backup
     sync_specified_folder() {
         # If no explicit path provided, use SOURCE_DIRS_LIST
-        local paths=()
+        local paths=() line line_trimmed
         if [[ -n "$SYNC_PATH" ]]; then
             paths=("$SYNC_PATH")
         else
@@ -188,40 +197,63 @@
 
         mount_remote_storage
 
+        local rsync_opts=(-avh --delete --exclude-from="$EXCLUDE_LIST")
+        $DRY_RUN && rsync_opts+=(-n)
+
+        local failed=0 p matches expanded abspath prefix relpath src dest excludes
         for p in "${paths[@]}"; do
-            # expand globs
-            for expanded in $(printf "%s\n" $p); do
-                if [ ! -e "$expanded" ]; then
-                    echo "Skipping missing path: $expanded"
+            # Expand globs without splitting the path on whitespace
+            mapfile -t matches < <(compgen -G "$p")
+            if [ ${#matches[@]} -eq 0 ]; then
+                echo "Error: source path not found: $p"
+                failed=1
+                continue
+            fi
+
+            for expanded in "${matches[@]}"; do
+                # Normalize "." and ".." (symlinks are kept), so the destination cannot escape the mount point
+                if ! abspath=$(realpath -s -e -- "$expanded"); then
+                    echo "Error: cannot resolve path: $expanded"
+                    failed=1
+                    continue
+                fi
+                prefix="${abspath%/}/"
+                if [[ "$prefix" == "$LOCAL_MOUNT_POINT/"* ]]; then
+                    echo "Error: refusing to sync a path inside the mount point: $abspath"
+                    failed=1
                     continue
                 fi
 
-                # calculate a relative path base so we don't include leading /
-                relpath="${expanded#/}"
-                if [ -d "$expanded" ]; then
-                    dest="$LOCAL_MOUNT_POINT/$relpath"
-                    echo "Syncing directory $expanded -> $dest/"
-                    mkdir -p "$dest"
-                    if $DRY_RUN; then
-                        rsync -avhn --delete --exclude-from="$EXCLUDE_LIST" "$expanded/" "$dest/"
-                    else
-                        rsync -avh --delete --exclude-from="$EXCLUDE_LIST" "$expanded/" "$dest/"
+                relpath="${abspath#/}"
+                excludes=()
+                if [ -d "$abspath" ]; then
+                    src="$prefix"
+                    dest="$LOCAL_MOUNT_POINT/$relpath/"
+                    # A source containing the mount point would otherwise copy the share into itself
+                    if [[ "$LOCAL_MOUNT_POINT" == "$prefix"* ]]; then
+                        excludes=(--exclude="/${LOCAL_MOUNT_POINT#"$prefix"}/")
                     fi
                 else
-                    dest_dir="$(dirname "$LOCAL_MOUNT_POINT/$relpath")"
-                    echo "Syncing file $expanded -> $dest_dir/"
-                    mkdir -p "$dest_dir"
-                    if $DRY_RUN; then
-                        rsync -avhn --delete --exclude-from="$EXCLUDE_LIST" "$expanded" "$dest_dir/"
-                    else
-                        rsync -avh --delete --exclude-from="$EXCLUDE_LIST" "$expanded" "$dest_dir/"
-                    fi
+                    src="$abspath"
+                    dest="$(dirname "$LOCAL_MOUNT_POINT/$relpath")/"
+                fi
+
+                echo "Syncing $src -> $dest"
+                # In dry-run the share is mounted read-only, rsync -n reports missing directories by itself
+                if ! $DRY_RUN && ! mkdir -p "$dest"; then
+                    echo "Error: cannot create $dest"
+                    failed=1
+                    continue
+                fi
+                if ! rsync "${rsync_opts[@]}" "${excludes[@]}" "$src" "$dest"; then
+                    echo "Error: rsync failed for $src"
+                    failed=1
                 fi
             done
         done
 
-        unmount_remote_storage
-        echo "Sync completed."
+        unmount_remote_storage || failed=1
+        return $failed
     }
 
     copy_source_dirs() {
@@ -261,7 +293,11 @@
             echo "\"$LOCAL_MOUNT_POINT\" already exists."
         fi
 
-        mount -t cifs -o rw,file_mode=0660,dir_mode=0660,vers="$SAMBA_VERSION",username="$SAMBA_USERNAME",password="$SAMBA_PASSWORD" \
+        # A dry run must not be able to change anything on the share
+        local mode=rw
+        $DRY_RUN && mode=ro
+
+        mount -t cifs -o "$mode",file_mode=0660,dir_mode=0660,vers="$SAMBA_VERSION",username="$SAMBA_USERNAME",password="$SAMBA_PASSWORD" \
             "//$SAMBA_SERVER$SAMBA_FOLDER" "$LOCAL_MOUNT_POINT"
 
         if [ $? -ne 0 ]; then
@@ -371,23 +407,31 @@
     resolve_credentials
     ensure_remote_unmounted
 
-    # If config sets sync-only by default and CLI didn't enable/disable, enable it
-    if [[ "$SYNC_ONLY" != "true" && "$SYNC_ONLY_DEFAULT" == "true" ]]; then
-        SYNC_ONLY=true
-    fi
-
-    if $SYNC_ONLY; then
-        # run sync-only flow and exit
-        echo "Running in sync-only mode..."
-        sync_specified_folder
-        exit 0
-    fi
-
+    # An explicit --test-samba must not be turned into a sync by SYNC_ONLY_DEFAULT
     if $TEST_SAMBA; then
         echo "Testing Samba/CIFS connection..."
         mount_remote_storage
         unmount_remote_storage || exit 1
         echo "Samba/CIFS connection test completed."
+        exit 0
+    fi
+
+    # --sync-only / --no-sync-only on the CLI win, otherwise the config default decides
+    if [[ -z "$SYNC_ONLY" ]]; then
+        if [[ "$SYNC_ONLY_DEFAULT" == "true" ]]; then
+            SYNC_ONLY=true
+        else
+            SYNC_ONLY=false
+        fi
+    fi
+
+    if $SYNC_ONLY; then
+        echo "Running in sync-only mode..."
+        if ! sync_specified_folder; then
+            print_done " with errors (sync-only)"
+            exit 1
+        fi
+        print_done
         exit 0
     fi
 
