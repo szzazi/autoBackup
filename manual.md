@@ -66,10 +66,11 @@ autoBackup/
 ├── excludeList.txt(.example) # Exclude patterns (rsync)
 ├── remote/                   # Temporary mount point – exists only while the script runs
 ├── temp/                     # Temporary staging folder (ZIP mode only) – removed after the run
+├── zip/                      # ZIPs waiting for upload (ZIP mode only) – each is deleted once it reached the share
 └── .autoBackup.lock          # Lock file, prevents concurrent runs
 ```
 
-> The `remote/`, `temp/` and `.autoBackup.lock` paths are always relative to the directory of `startBackup.sh` and cannot be configured.
+> The `remote/`, `temp/`, `zip/` and `.autoBackup.lock` paths are always relative to the directory of `startBackup.sh` and cannot be configured.
 
 ---
 
@@ -89,10 +90,19 @@ This is the classic "snapshot" backup. Every run creates a **new, self-contained
 3. If `MYSQL_BACKUP_ENABLED="true"`, dumps the databases into `temp/mysql_dump/`:
    - one `schema.sql` per database (structure, routines, events, no data),
    - one `<table>.data.sql` per table (data only).
-4. Packs the contents of `temp/` into a ZIP file named:
+4. Packs the contents of `temp/` into a ZIP file in the `zip/` folder, named:
    `YYYYMMDD_HHMMSS-<hostname>.zip` (e.g. `20261007_010600-raspberrypi.zip`; dots in the hostname are replaced with `_`).
-5. Mounts the share and copies the ZIP file to the share root with `rsync`.
-6. Unmounts the share, deletes the local ZIP and the `temp/` folder.
+   The file is written as `.zip.part` and renamed to `.zip` only when it is complete.
+5. Mounts the share and copies **every** ZIP file in `zip/` to the share root with `rsync`, oldest first.
+   This includes ZIPs of earlier runs whose upload failed or was interrupted. Each ZIP is deleted
+   locally only after it reached the share; the rest stay in `zip/` and are retried on the next run.
+6. Unmounts the share and deletes the `temp/` folder.
+
+> Incomplete `.zip.part` files (from a run killed while zipping) are deleted at the next start and never uploaded.
+>
+> At most `ZIP_KEEP_MAX` ZIPs (default `10`, set in `config.conf`) are kept in `zip/`. If more are waiting,
+> for example because the share was offline for a long time, the oldest ones are deleted before the upload.
+> `ZIP_KEEP_MAX="0"` disables the limit.
 
 **Result on the share:**
 

@@ -64,6 +64,13 @@ MYSQL_EXCLUDE_DBS="mysql phpmyadmin"
 # using paths from SOURCE_DIRS_LIST. CLI --sync-only / --no-sync-only override this.
 SYNC_ONLY_DEFAULT="false"
 
+# === ZIP UPLOAD QUEUE ===
+# Zips that could not be uploaded (e.g. the share was offline) wait in the zip/ folder
+# next to startBackup.sh and are uploaded by the next run.
+# At most this many are kept there; the oldest ones are deleted beyond that.
+# Set to 0 to keep all of them (may fill the disk if the share stays offline).
+ZIP_KEEP_MAX="10"
+
 # === SAMBA/CIFS SETTINGS ===
 ###########################
 

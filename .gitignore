@@ -2,3 +2,4 @@ excludeList.txt
 sourceList.txt
 config.conf
 .autoBackup.lock
+zip/
