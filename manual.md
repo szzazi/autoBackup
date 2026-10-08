@@ -195,7 +195,7 @@ This is a **mirror**: the share always holds the current state of the sources, u
 | Single path from the CLI | No | Yes: `--sync-only /path` |
 | Spaces in paths (source list) | Supported | Supported |
 | Anchored (`/...`) excludes | Relative to the filesystem root | Relative to the synced folder |
-| Missing source | Warning, backup continues | Error, exit code `1` at the end |
+| Missing source | Warning, backup continues ("completed with warnings") | Error, exit code `1` at the end |
 | Copy error (e.g. permission denied) | Warning, backup continues ("completed with warnings") | Error, exit code `1` at the end |
 | Cleaning up old backups | Manually / with a separate script | Not needed |
 
