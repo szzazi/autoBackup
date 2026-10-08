@@ -430,20 +430,21 @@ change_to_program_dir() {
 }
 
 # Copies every path of SOURCE_DIRS_LIST into DESTINATION_DIR, keeping the full path (--relative).
-# A path that cannot be copied (e.g. a read or permission error) is reported and skipped,
-# the other paths are still copied. Returns non-zero if that happened, so the run can end
-# "with warnings". A missing source and rsync code 24 (files vanished while copying,
-# normal on a live system) only print a warning.
+# A problem with one source never stops the copy, the other paths are still copied:
+# a missing source, a path that cannot be copied (e.g. a read or permission error) and
+# rsync code 24 (files vanished while copying, normal on a live system) are reported
+# as warnings. Returns non-zero if there was any, so the run ends "with warnings".
 copy_source_dirs() {
     echo "Copying source directories..."
     mkdir -p "$DESTINATION_DIR" || return 1
     read_source_list
 
-    local failed=0 pattern path rc
+    local warned=0 pattern path rc
     for pattern in "${SOURCE_PATHS[@]}"; do
         expand_path "$pattern"
         if [ ${#MATCHES[@]} -eq 0 ]; then
             echo "Warning: source path not found, skipped: $pattern"
+            warned=1
             continue
         fi
 
@@ -456,13 +457,14 @@ copy_source_dirs() {
             rc=$?
             if [ $rc -eq 24 ]; then
                 echo "Warning: some files of $path vanished while copying"
+                warned=1
             elif [ $rc -ne 0 ]; then
                 echo "Warning: copying $path failed (rsync exit code $rc), continuing with the rest"
-                failed=1
+                warned=1
             fi
         done
     done
-    return $failed
+    return $warned
 }
 
 # Common connection arguments of the mysql and mysqldump commands
@@ -628,7 +630,7 @@ run_zip_backup() {
     # The backup runs unattended from cron, so a path that cannot be copied does not stop it:
     # everything else is still zipped and uploaded, and the run ends "with warnings"
     if ! copy_source_dirs; then
-        echo "Warning: some sources could not be copied, the zip of this run is incomplete"
+        echo "Warning: some sources were missing or could not be copied fully, the zip of this run is incomplete"
         WARNINGS=true
     fi
     if [ "$MYSQL_BACKUP_ENABLED" = "true" ]; then
