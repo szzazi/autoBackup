@@ -306,6 +306,7 @@ sync_specified_folder() {
         for path in "${MATCHES[@]}"; do
             sync_path_to_remote "$path" || failed=1
         done
+        remove_vanished_matches "$pattern" || failed=1
     done
 
     unmount_remote_storage || failed=1
