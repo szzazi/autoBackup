@@ -1,21 +1,83 @@
 #!/bin/bash
 #########################################################
-# autoBackup.sh installer and configurator
-# Keeps the original comments and structure of config.conf.example
+# autoBackup installer and configurator
+#
+# 1. Installs the missing packages (rsync, zip, cifs-utils)
+# 2. Asks for every setting; the current value is offered as the default,
+#    so re-running it is an easy way to change the configuration
+# 3. Writes the config from config.conf.example, keeping its comments and order
+# 4. Tests the Samba connection
+# 5. Creates the source and exclude lists (at the configured paths) from their examples
+# 6. Optionally schedules the backup in crontab
 #########################################################
 
-CONFIG_FILE="./config.conf"
-CONFIG_EXAMPLE="./config.conf.example"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+CONFIG_EXAMPLE="$SCRIPT_DIR/config.conf.example"
+CONFIG_FILE="$SCRIPT_DIR/config.conf"   # can be changed at the first prompt
 
+# KEY -> value of every setting, filled from the existing config and the prompts
 declare -A config_values
 
+
+# ======================================================
+# Existing config
+# ======================================================
+
+# Reads the settings of an existing config into config_values.
+# The config is sourced (in a subshell, so nothing leaks into the installer), exactly as
+# startBackup.sh does, so every value is what the backup really uses: quotes, escapes,
+# comments and references like "$PROGRAM_DIR/sourceList.txt" are all resolved by the shell.
+load_existing_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        return
+    fi
+
+    # The names of the settings: every KEY= at the start of a line
+    local keys
+    keys=$(grep -oE '^[A-Za-z0-9_]+=' "$CONFIG_FILE" | tr -d '=' | sort -u)
+
+    # The subshell prints KEY\0VALUE\0 pairs; \0 cannot occur in a value, so any value is safe
+    local key value
+    while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+        config_values[$key]="$value"
+    done < <(
+        source "$CONFIG_FILE" >/dev/null 2>&1
+        for key in $keys; do
+            if [ -n "${!key+set}" ]; then
+                printf '%s\0%s\0' "$key" "${!key}"
+            fi
+        done
+    )
+}
+
+# Prints a value in single quotes, so the shell takes it literally when the config is sourced:
+# $, ", `, \ and spaces need no escaping there, only a ' itself, which is written as '\''
+#   e.g.  pa$$w"rd  ->  'pa$$w"rd'     it's  ->  'it'\''s'
+shell_quote() {
+    local escaped="${1//\'/\'\\\'\'}"
+    printf "'%s'" "$escaped"
+}
+
+
+# ======================================================
+# Packages
+# ======================================================
+
+# Installs the packages whose command is missing.
+# The command and the package name differ for cifs-utils, so both are listed.
 check_dependencies() {
     echo "Checking required packages..."
 
-    missing=()
-    for pkg in rsync zip cifs-utils; do
-        if ! command -v "$pkg" >/dev/null 2>&1; then
-            missing+=("$pkg")
+    local -A package_of_command=(
+        [rsync]=rsync
+        [zip]=zip
+        [mount.cifs]=cifs-utils
+    )
+
+    local missing=() cmd
+    for cmd in "${!package_of_command[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("${package_of_command[$cmd]}")
         fi
     done
 
@@ -28,36 +90,68 @@ check_dependencies() {
     fi
 }
 
+
+# ======================================================
+# Prompts
+# ======================================================
+
+# Asks for one setting, offering the current value (or the fallback) as an editable default.
+#   $1: config key   $2: prompt text   $3: fallback if the key has no value yet
+ask() {
+    local key="$1" prompt="$2" fallback="$3" val
+    local default="${config_values[$key]:-$fallback}"
+    read -e -i "$default" -p "$prompt: " val
+    config_values[$key]="${val:-$default}"
+}
+
+# Asks for a secret without echoing it. An empty answer keeps the current value.
+#   $1: config key   $2: prompt text
+ask_secret() {
+    local key="$1" prompt="$2" val
+    read -rsp "$prompt (press enter to keep existing): " val
+    echo ""
+    config_values[$key]="${val:-${config_values[$key]:-}}"
+}
+
 prompt_user_input() {
     echo ""
     echo "=== Configuration ==="
 
-    read -rp "Backup script directory (default: $(pwd)): " val
-    config_values[PROGRAM_DIR]="${val:-$(pwd)}"
+    # Program and list files
+    ask PROGRAM_DIR      "Backup script directory"    "$SCRIPT_DIR"
+    ask SOURCE_DIRS_LIST "Path to source list file"   "${config_values[PROGRAM_DIR]}/sourceList.txt"
+    ask EXCLUDE_LIST     "Path to exclude list file"  "${config_values[PROGRAM_DIR]}/excludeList.txt"
 
-    read -rp "Path to source list file (default: \$PROGRAM_DIR/sourceList.txt): " val
-    config_values[SOURCE_DIRS_LIST]="${val:-${config_values[PROGRAM_DIR]}/sourceList.txt}"
+    # Samba share
+    ask SAMBA_SERVER   "Samba server IP or hostname"          ""
+    ask SAMBA_FOLDER   "Samba folder (e.g., /backupTarget)"   ""
+    ask SAMBA_VERSION  "Samba version (e.g., 1.0, 3.0)"       "1.0"
+    ask SAMBA_USERNAME "Samba username"                       ""
+    ask_secret SAMBA_PASSWORD "Samba password"
 
-    read -rp "Path to exclude list file (default: \$PROGRAM_DIR/excludeList.txt): " val
-    config_values[EXCLUDE_LIST]="${val:-${config_values[PROGRAM_DIR]}/excludeList.txt}"
+    # MySQL (the details are only asked if it is enabled)
+    ask MYSQL_BACKUP_ENABLED "Enable MySQL database backup? (true/false)" "false"
+    if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
+        ask MYSQL_USERNAME "MySQL username for backup" ""
+        ask_secret MYSQL_PASSWORD "MySQL password for backup"
+        ask MYSQL_HOST "MySQL host" "localhost"
+        ask MYSQL_PORT "MySQL port" "3306"
+        ask MYSQL_EXCLUDE_DBS "Excluded databases (space-separated)" "mysql phpmyadmin"
+    fi
 
-    read -rp "Samba server IP or hostname: " val
-    config_values[SAMBA_SERVER]="$val"
-
-    read -rp "Samba folder (e.g., /backupTarget): " val
-    config_values[SAMBA_FOLDER]="$val"
-
-    read -rp "Samba version (e.g., 1.0, 3.0): " val
-    config_values[SAMBA_VERSION]="$val"
-
-    read -rp "Samba username: " val
-    config_values[SAMBA_USERNAME]="$val"
-
-    read -rsp "Samba password: " val
-    echo ""
-    config_values[SAMBA_PASSWORD]="$val"
+    # Mode
+    ask SYNC_ONLY_DEFAULT "Set sync-only by default? (true/false)" "false"
 }
 
+
+# ======================================================
+# Writing the config
+# ======================================================
+
+# Rebuilds the config from the example: comments and other lines are copied as they are,
+# KEY=value lines get the collected value (or keep the example value if there is none).
+# The collected values are written with shell_quote, so a password containing $, " or `
+# is read back unchanged by startBackup.sh.
 write_config() {
     if [ ! -f "$CONFIG_EXAMPLE" ]; then
         echo "Missing $CONFIG_EXAMPLE template!"
@@ -67,98 +161,119 @@ write_config() {
     echo "Creating $CONFIG_FILE from template..."
     rm -f "$CONFIG_FILE"
 
-    while IFS= read -r line; do
+    local line key
+    while IFS= read -r line || [ -n "$line" ]; do
         if [[ "$line" =~ ^([A-Za-z0-9_]+)= ]]; then
             key="${BASH_REMATCH[1]}"
             if [[ -n "${config_values[$key]}" ]]; then
-                value="${config_values[$key]}"
-                echo "$key=\"$value\"" >> "$CONFIG_FILE"
+                echo "$key=$(shell_quote "${config_values[$key]}")" >> "$CONFIG_FILE"
                 continue
             fi
         fi
         echo "$line" >> "$CONFIG_FILE"
     done < "$CONFIG_EXAMPLE"
 
+    # The file contains passwords
     chmod 600 "$CONFIG_FILE"
     echo "Config written to $CONFIG_FILE with permission 600 ✅"
 }
 
+
+# ======================================================
+# Samba test
+# ======================================================
+
+# Mounts the share to a temporary folder and unmounts it again
 test_samba_connection() {
     echo ""
     echo "Testing Samba mount..."
 
-    TMP_MOUNT="./__smbtest__"
-    mkdir -p "$TMP_MOUNT"
+    local tmp_mount="$SCRIPT_DIR/__smbtest__"
+    mkdir -p "$tmp_mount"
 
-    mount -t cifs -o rw,vers="${config_values[SAMBA_VERSION]}",username="${config_values[SAMBA_USERNAME]}",password="${config_values[SAMBA_PASSWORD]}" \
-        "//${config_values[SAMBA_SERVER]}${config_values[SAMBA_FOLDER]}" "$TMP_MOUNT" >/dev/null 2>&1
+    mount -t cifs \
+        -o rw,vers="${config_values[SAMBA_VERSION]}",username="${config_values[SAMBA_USERNAME]}",password="${config_values[SAMBA_PASSWORD]}" \
+        "//${config_values[SAMBA_SERVER]}${config_values[SAMBA_FOLDER]}" "$tmp_mount" >/dev/null 2>&1
 
-    if mountpoint -q "$TMP_MOUNT"; then
+    if mountpoint -q "$tmp_mount"; then
         echo "✅ Successfully connected to Samba share."
-        umount "$TMP_MOUNT"
+        umount "$tmp_mount"
     else
         echo "❌ Failed to connect to Samba share. Check credentials or server access."
     fi
 
-    rmdir "$TMP_MOUNT"
+    rmdir "$tmp_mount"
+}
+
+
+# ======================================================
+# Source and exclude lists
+# ======================================================
+
+# Returns the first available text editor (falls back to less, which can only view)
+find_editor() {
+    local e
+    for e in nano vim vi; do
+        if command -v "$e" >/dev/null 2>&1; then
+            echo "$e"
+            return
+        fi
+    done
+    echo "less"
+}
+
+# Creates a list file from its .example and opens it for editing.
+# An existing list is never overwritten.
+#   $1: list file   $2: example file   $3: description shown to the user   $4: editor
+create_list_file() {
+    local file="$1" example="$2" description="$3" editor="$4"
+
+    if [ -f "$file" ]; then
+        echo "ℹ $file already exists, not overwritten"
+    elif [ -f "$example" ]; then
+        mkdir -p "$(dirname "$file")"
+        cp "$example" "$file"
+        echo "✔ $file created from example"
+        echo "📂 $description"
+        echo "✏️ Opening $file for editing..."
+        "$editor" "$file"
+    else
+        echo "⚠ $example not found"
+    fi
 }
 
 create_source_and_exclude_lists() {
     echo ""
-    echo "Creating sourceList.txt and excludeList.txt from .example files..."
+    echo "Creating the source and exclude lists from .example files..."
 
-    local src_dir="${config_values[PROGRAM_DIR]}"
-    [ -z "$src_dir" ] && src_dir="$(pwd)"
+    # The paths entered at the prompts, so the files are where startBackup.sh reads them
+    local dir="${config_values[PROGRAM_DIR]:-$SCRIPT_DIR}"
+    local source_list="${config_values[SOURCE_DIRS_LIST]:-$dir/sourceList.txt}"
+    local exclude_list="${config_values[EXCLUDE_LIST]:-$dir/excludeList.txt}"
+    local editor
+    editor="$(find_editor)"
 
-    local source_example="$src_dir/sourceList.txt.example"
-    local exclude_example="$src_dir/excludeList.txt.example"
-    local source_file="$src_dir/sourceList.txt"
-    local exclude_file="$src_dir/excludeList.txt"
-
-    # Detect available editor
-    local editor=""
-    for e in nano vim vi; do
-        if command -v "$e" >/dev/null 2>&1; then
-            editor="$e"
-            break
-        fi
-    done
-    [ -z "$editor" ] && editor="less"
-
-    if [ -f "$source_example" ] && [ ! -f "$source_file" ]; then
-        cp "$source_example" "$source_file"
-        echo "✔ $source_file created from example"
-        echo "📂 Contains default configuration folders to back up (e.g. /etc, ~/.config)"
-        echo "✏️ Opening $source_file for editing..."
-        "$editor" "$source_file"
-    elif [ -f "$source_file" ]; then
-        echo "ℹ $source_file already exists, not overwritten"
-    else
-        echo "⚠ $source_example not found"
-    fi
-
-    if [ -f "$exclude_example" ] && [ ! -f "$exclude_file" ]; then
-        cp "$exclude_example" "$exclude_file"
-        echo "✔ $exclude_file created from example"
-        echo "📂 Contains exclude rules (e.g. *.tmp, .cache/)"
-        echo "✏️ Opening $exclude_file for editing..."
-        "$editor" "$exclude_file"
-    elif [ -f "$exclude_file" ]; then
-        echo "ℹ $exclude_file already exists, not overwritten"
-    else
-        echo "⚠ $exclude_example not found"
-    fi
+    create_list_file "$source_list" "$SCRIPT_DIR/sourceList.txt.example" \
+        "Contains default configuration folders to back up (e.g. /etc, ~/.config)" "$editor"
+    create_list_file "$exclude_list" "$SCRIPT_DIR/excludeList.txt.example" \
+        "Contains exclude rules (e.g. *.tmp, .cache/)" "$editor"
 }
 
-confirm() {
-    read -rp "Do you want to continue (y/n)? " answer
-    [[ "$answer" =~ ^[Yy]$ ]]
-}
 
+# ======================================================
+# Cron
+# ======================================================
+
+# Adds a crontab entry that runs startBackup.sh with this config.
+#   - An entry for the same script and config is left as it is.
+#   - An old entry for this script without --config is replaced, because it would
+#     silently use the config next to the script instead of this one.
+#   - Entries of the script with other configs are kept.
 setup_cron_job() {
     echo ""
     echo "Would you like to schedule automatic backups via cron?"
 
+    local answer choice cron_expr
     read -rp "Schedule auto-backup in crontab? (y/n): " answer
     if [[ ! "$answer" =~ ^[Yy]$ ]]; then
         echo "⏩ Skipping cron setup."
@@ -173,62 +288,54 @@ setup_cron_job() {
     echo "4) Custom cron expression"
 
     read -rp "Select option [1-4]: " choice
-
     case $choice in
-        1) cron_expr="06 01 * * *" ;;
+        1)    cron_expr="06 01 * * *" ;;
         2|"") cron_expr="06 01 */3 * *" ;;
-        3) cron_expr="06 01 * * 0" ;;
-        4) read -rp "Enter custom cron expression (5 fields): " cron_expr ;;
-        *) echo "Invalid option. Skipping."; return ;;
+        3)    cron_expr="06 01 * * 0" ;;
+        4)    read -rp "Enter custom cron expression (5 fields): " cron_expr ;;
+        *)    echo "Invalid option. Skipping."; return ;;
     esac
 
-    script_path="$SCRIPT_DIR/startBackup.sh"
-    log_path="/var/log/autoBackup.log"
-    cron_cmd="$cron_expr $script_path >>$log_path 2>&1"
+    local script_path="$SCRIPT_DIR/startBackup.sh"
+    local log_path="/var/log/autoBackup.log"
+    local config_path
+    config_path="$(realpath -- "$CONFIG_FILE")"
+    local cron_cmd="$cron_expr \"$script_path\" --config \"$config_path\" >>$log_path 2>&1"
 
-    current_cron=$(crontab -l 2>/dev/null)
+    local current_cron
+    current_cron=$(crontab -l 2>/dev/null || true)
 
-    if echo "$current_cron" | grep -qF "$script_path"; then
-        echo "ℹ Cron job already exists for this script. Skipping."
-    else
-        (echo "$current_cron"; echo "$cron_cmd") | crontab -
-        echo "✅ Cron job added:"
-        echo "$cron_cmd"
+    # Same script with the same config: nothing to do
+    if echo "$current_cron" | grep -F "$script_path" | grep -qF -- "--config \"$config_path\""; then
+        echo "ℹ Cron job already exists for this script and config. Skipping."
+        return
     fi
+
+    # Drop the entries of this script that have no --config (from an older installer),
+    # keep every other line in its original order
+    local kept_cron
+    kept_cron=$(printf '%s\n' "$current_cron" \
+        | awk -v s="$script_path" '!(index($0, s) && !index($0, "--config"))')
+    if [[ "$kept_cron" != "$current_cron" ]]; then
+        echo "ℹ Replacing the old cron job that runs the script without --config."
+    fi
+
+    (echo "$kept_cron"; echo "$cron_cmd") | grep -v '^$' | crontab -
+    echo "✅ Cron job added:"
+    echo "$cron_cmd"
 }
 
 
-# === MAIN ===
+# ======================================================
+# Main
+# ======================================================
 
 echo "Welcome to Auto Backup installer"
 
-if [ -f "$CONFIG_FILE" ]; then
-    echo "Config file already exists at $CONFIG_FILE."
-    if confirm; then
-            # === MySQL Backup Settings ===
-            read -rp "Enable MySQL database backup? (true/false) [true]: " val
-            config_values[MYSQL_BACKUP_ENABLED]="${val:-true}"
+read -rp "Path to config file to use (default: $CONFIG_FILE): " input_cfg
+CONFIG_FILE="${input_cfg:-$CONFIG_FILE}"
 
-            if [[ "${config_values[MYSQL_BACKUP_ENABLED]}" == "true" ]]; then
-                read -rp "MySQL username for backup: " val
-                config_values[MYSQL_USERNAME]="$val"
-                read -rsp "MySQL password for backup: " val
-                echo ""
-                config_values[MYSQL_PASSWORD]="$val"
-                read -rp "MySQL host (default: localhost): " val
-                config_values[MYSQL_HOST]="${val:-localhost}"
-                read -rp "MySQL port (default: 3306): " val
-                config_values[MYSQL_PORT]="${val:-3306}"
-                read -rp "Excluded databases (space-separated, default: mysql phpmyadmin): " val
-                config_values[MYSQL_EXCLUDE_DBS]="${val:-mysql phpmyadmin}"
-            fi
-        echo "Reconfiguring..."
-    else
-        echo "Installation cancelled."
-        exit 0
-    fi
-fi
-
+load_existing_config
 check_dependencies
 prompt_user_input
 write_config
@@ -239,3 +346,11 @@ setup_cron_job
 echo ""
 echo "✅ Installation complete. You can now run: ./startBackup.sh"
 echo "To configure the script, edit $CONFIG_FILE or run the installer again."
+echo ""
+echo "Notes:"
+echo " - You can sync folders directly to the remote (no zip) with the --sync-only option."
+echo "   If you call: ./startBackup.sh --sync-only (without a path), the script will read the paths from SOURCE_DIRS_LIST in your config and sync each listed path."
+echo ""
+echo "Examples:"
+echo "  ./startBackup.sh --sync-only /var/www        # sync a single folder"
+echo "  ./startBackup.sh --sync-only                # sync all paths listed in SOURCE_DIRS_LIST"
