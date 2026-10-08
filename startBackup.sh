@@ -312,6 +312,43 @@ sync_specified_folder() {
     return $failed
 }
 
+# The matches of a glob pattern are synced one by one, so a match deleted locally
+# (e.g. /data/b of /data/*) would stay on the share forever. This expands the pattern
+# on the share too, and deletes every match that no longer exists locally.
+#   - Only absolute patterns without "." / ".." parts: for them a match on the share
+#     maps back to exactly one local path.
+#   - Matches at the top level of the share are never deleted: the zips of the ZIP mode live there.
+#   - A pattern with no local match at all is reported as an error by the caller and
+#     not cleaned up, so e.g. an unmounted disk does not wipe its copy on the share.
+remove_vanished_matches() {
+    local pattern="$1"
+    [[ "$pattern" == *[\*\?\[]* ]] || return 0
+    [ ${#MATCHES[@]} -eq 0 ] && return 0
+    if [[ "$pattern" != /* || "$pattern/" == */./* || "$pattern/" == */../* ]]; then
+        echo "Warning: not an absolute path, stale matches of $pattern are not removed from the share"
+        return 0
+    fi
+
+    # Leading slashes removed, the pattern is expanded relative to the mount point
+    local rel_pattern="${pattern#"${pattern%%[!/]*}"}"
+    local remote_matches=()
+    mapfile -t remote_matches < <(cd "$LOCAL_MOUNT_POINT" && compgen -G "$rel_pattern")
+
+    local failed=0 rel
+    for rel in "${remote_matches[@]}"; do
+        [[ "$rel" == */* ]] || continue
+        [ -e "/$rel" ] || [ -L "/$rel" ] && continue
+
+        if $DRY_RUN; then
+            echo "[Dry-run] Would delete from the share (no longer exists locally): $rel"
+        else
+            echo "Deleting from the share (no longer exists locally): $rel"
+            rm -rf -- "${LOCAL_MOUNT_POINT:?}/$rel" || { echo "Error: cannot delete $rel"; failed=1; }
+        fi
+    done
+    return $failed
+}
+
 # Mirrors one local file or folder to the same absolute path under the share,
 # e.g. /var/www -> <share>/var/www/. Files deleted locally are deleted on the share too.
 #
