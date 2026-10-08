@@ -325,7 +325,7 @@ sync_specified_folder() {
 # so only the source path itself needs these checks.
 sync_path_to_remote() {
     local abspath real_path real_prefix mount_real relpath src dest
-    local rsync_opts=(-avh --delete --exclude-from="$EXCLUDE_LIST")
+    local rsync_opts=(-avh --delete)
     $DRY_RUN && rsync_opts+=(-n)
 
     if ! abspath=$(realpath -s -e -- "$1") || ! real_path=$(realpath -e -- "$1"); then
@@ -356,6 +356,9 @@ sync_path_to_remote() {
         src="$abspath"
         dest="$(dirname "$LOCAL_MOUNT_POINT/$relpath")/"
     fi
+    # rsync uses the first matching rule, so the user's list comes after the mount exclude:
+    # an include ("+ ...") rule in it can never pull the mounted share back in
+    rsync_opts+=(--exclude-from="$EXCLUDE_LIST")
 
     echo "Syncing $src -> $dest"
 
@@ -397,7 +400,8 @@ copy_source_dirs() {
 
         for path in "${MATCHES[@]}"; do
             # The mount point, the temp dir and the zip dir are always excluded, regardless of the
-            # exclude list, so neither the share nor earlier backups end up in this backup
+            # exclude list, so neither the share nor earlier backups end up in this backup.
+            # They come before --exclude-from: rsync uses the first matching rule.
             rsync -avr --exclude="$LOCAL_MOUNT_POINT" --exclude="$DESTINATION_DIR" --exclude="$ZIP_DIR" \
                 --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
         done
