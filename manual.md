@@ -87,6 +87,10 @@ This is the classic "snapshot" backup. Every run creates a **new, self-contained
    `rsync -avr --relative`, so the full path is preserved (e.g. `/etc/nginx` → `temp/etc/nginx`).
    - Patterns from `EXCLUDE_LIST` are skipped.
    - The `remote/` and `temp/` folders are always excluded, so the share's content never ends up in the backup.
+   - Problems with a single source **do not stop the backup** (it usually runs unattended from cron):
+     a missing path, a path that cannot be copied (e.g. a read or permission error), or files that vanish
+     while being copied only print a warning. The remaining sources are still copied, zipped and uploaded,
+     and the run ends with "Backup process completed with warnings" (exit code `0`). Check the log for these warnings.
 3. If `MYSQL_BACKUP_ENABLED="true"`, dumps the databases into `temp/mysql_dump/`:
    - one `schema.sql` per database (structure, routines, events, no data),
    - one `<table>.data.sql` per table (data only).
@@ -172,6 +176,7 @@ This is a **mirror**: the share always holds the current state of the sources, u
 - Safety limits:
   - it refuses to sync a path inside the `remote/` mount point,
   - if a source contains the mount point (e.g. syncing `/` or `/usr/local/bin`), the mount point is excluded automatically, so the share is never copied into itself. This exclude comes before the exclude list, so an include (`+ ...`) rule there cannot override it.
+  - when `/` itself is synced, its destination is the share root: the ZIP files there (`/*.zip`) are protected from `--delete`, so the two modes can share the same target.
   - stale glob matches are only removed for absolute patterns without `.`/`..` parts, never at the top level of the share (where the ZIP files are), and not at all if the pattern has no local match (e.g. an unmounted disk) – that case is reported as an error instead.
 
 > **Warning – exclude patterns:** in sync-only mode rsync copies the *contents* of each source folder separately. Therefore exclude patterns starting with `/` (anchored patterns) are relative to **the synced folder**, not to the filesystem root. For example, the pattern `/etc/alternatives/*` will not match when syncing `/etc`; you would need `alternatives/*` or `/alternatives/*` instead. Unanchored patterns (`*.log`, `*.key`, `.cache/`) behave the same in both modes.
@@ -190,7 +195,8 @@ This is a **mirror**: the share always holds the current state of the sources, u
 | Single path from the CLI | No | Yes: `--sync-only /path` |
 | Spaces in paths (source list) | Supported | Supported |
 | Anchored (`/...`) excludes | Relative to the filesystem root | Relative to the synced folder |
-| Missing source | rsync prints an error, backup continues | Error, exit code `1` at the end |
+| Missing source | Warning, backup continues | Error, exit code `1` at the end |
+| Copy error (e.g. permission denied) | Warning, backup continues ("completed with warnings") | Error, exit code `1` at the end |
 | Cleaning up old backups | Manually / with a separate script | Not needed |
 
 ### Which mode should I use?
@@ -374,7 +380,7 @@ The installer can be re-run at any time to change settings, or `config.conf` can
 | Code | Meaning |
 |---|---|
 | `0` | Successful run. |
-| `1` | Error: missing config / credentials, failed mount or unmount, another instance running, invalid or missing source in sync-only mode, ZIP could not be created or uploaded. |
+| `1` | Error: missing config / credentials, failed mount or unmount, another instance running, invalid or missing source in sync-only mode, ZIP could not be created or uploaded. (In ZIP mode a source that cannot be copied is only a warning, the exit code stays `0`.) |
 | `130` | Interrupted (`Ctrl+C`). |
 | `143` | Terminated (`SIGTERM`). |
 

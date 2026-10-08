@@ -24,6 +24,7 @@ LOCAL_MOUNT_POINT="$SCRIPT_DIR/remote"   # the Samba share is mounted here
 ZIP_DIR="$SCRIPT_DIR/zip"                # the zip is created here before it is copied to the share
 LOCK_FILE="$SCRIPT_DIR/.autoBackup.lock"
 BACKUP_FILE=""                           # absolute path of the zip, set by generate_backup_filename
+WARNINGS=false                           # set if something was skipped, but the backup still completed
 
 # Command line options
 CLI_USERNAME=""
@@ -390,6 +391,12 @@ sync_path_to_remote() {
         if [[ "$mount_real" == "$real_prefix"* ]]; then
             rsync_opts+=(--exclude="/${mount_real#"$real_prefix"}/")
         fi
+        # Syncing "/" targets the share root, where the ZIP mode keeps its archives.
+        # They do not exist locally, so --delete would remove them: the P (protect) rule
+        # keeps them on the share. Like the mount exclude, it must precede the user's rules.
+        if [[ -z "$relpath" ]]; then
+            rsync_opts+=(--filter="P /*.zip")
+        fi
     else
         src="$abspath"
         dest="$(dirname "$LOCAL_MOUNT_POINT/$relpath")/"
@@ -422,13 +429,17 @@ change_to_program_dir() {
     cd "$PROGRAM_DIR" || { echo "Cannot change directory to $PROGRAM_DIR"; exit 1; }
 }
 
-# Copies every path of SOURCE_DIRS_LIST into DESTINATION_DIR, keeping the full path (--relative)
+# Copies every path of SOURCE_DIRS_LIST into DESTINATION_DIR, keeping the full path (--relative).
+# A path that cannot be copied (e.g. a read or permission error) is reported and skipped,
+# the other paths are still copied. Returns non-zero if that happened, so the run can end
+# "with warnings". A missing source and rsync code 24 (files vanished while copying,
+# normal on a live system) only print a warning.
 copy_source_dirs() {
     echo "Copying source directories..."
-    mkdir -p "$DESTINATION_DIR"
+    mkdir -p "$DESTINATION_DIR" || return 1
     read_source_list
 
-    local pattern path
+    local failed=0 pattern path rc
     for pattern in "${SOURCE_PATHS[@]}"; do
         expand_path "$pattern"
         if [ ${#MATCHES[@]} -eq 0 ]; then
@@ -442,8 +453,16 @@ copy_source_dirs() {
             # They come before --exclude-from: rsync uses the first matching rule.
             rsync -avr --exclude="$LOCAL_MOUNT_POINT" --exclude="$DESTINATION_DIR" --exclude="$ZIP_DIR" \
                 --exclude-from="$EXCLUDE_LIST" --relative "$path" "$DESTINATION_DIR"
+            rc=$?
+            if [ $rc -eq 24 ]; then
+                echo "Warning: some files of $path vanished while copying"
+            elif [ $rc -ne 0 ]; then
+                echo "Warning: copying $path failed (rsync exit code $rc), continuing with the rest"
+                failed=1
+            fi
         done
     done
+    return $failed
 }
 
 # Common connection arguments of the mysql and mysqldump commands
@@ -606,7 +625,12 @@ run_zip_backup() {
     local failed=0
 
     change_to_program_dir
-    copy_source_dirs
+    # The backup runs unattended from cron, so a path that cannot be copied does not stop it:
+    # everything else is still zipped and uploaded, and the run ends "with warnings"
+    if ! copy_source_dirs; then
+        echo "Warning: some sources could not be copied, the zip of this run is incomplete"
+        WARNINGS=true
+    fi
     if [ "$MYSQL_BACKUP_ENABLED" = "true" ]; then
         dump_mysql_databases
     fi
@@ -746,5 +770,10 @@ if [ $status -ne 0 ]; then
     exit 1
 fi
 
-print_done
+# Warnings do not fail the run: the backup was made, only some sources are missing from it
+if $WARNINGS; then
+    print_done " with warnings"
+else
+    print_done
+fi
 exit 0
