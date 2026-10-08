@@ -119,7 +119,7 @@ This is the classic "snapshot" backup. Every run creates a **new, self-contained
 - The script **does not delete** old ZIP files – cleaning up old backups on the share has to be handled separately.
 - Needs temporary local disk space for the copy and the ZIP (roughly twice the size of the backed-up data).
 - Supports MySQL backups.
-- Paths containing spaces in the source list are **not** supported in this mode (the list is split on whitespace); glob patterns (`/usr/local/bin/*`) do work.
+- The source list is read the same way as in sync-only mode: one path per line, paths containing spaces work, empty lines and `#` comments are skipped; glob patterns (`/usr/local/bin/*`) work too.
 
 ### 2. Sync-only mode (folder sync)
 
@@ -146,6 +146,7 @@ This is a **mirror**: the share always holds the current state of the sources, u
      - folder: `/var/www` → `//server/backupTarget/var/www/`
      - file: `/etc/fstab` → `//server/backupTarget/etc/fstab`
    - runs: `rsync -avh --delete --exclude-from=EXCLUDE_LIST <source> <destination>`.
+   - for a glob pattern: expands the pattern on the share too, and deletes the matches that no longer exist locally (e.g. `/data/b` of `/data/*`), so they do not stay on the share as stale copies.
 4. Unmounts the share.
 
 **Result on the share:**
@@ -170,7 +171,8 @@ This is a **mirror**: the share always holds the current state of the sources, u
 - Error handling: if a path does not exist, cannot be resolved, or `rsync` fails, the script reports it, **continues with the remaining paths**, and exits with code `1` at the end ("completed with errors (sync-only)").
 - Safety limits:
   - it refuses to sync a path inside the `remote/` mount point,
-  - if a source contains the mount point (e.g. syncing `/` or `/usr/local/bin`), the mount point is excluded automatically, so the share is never copied into itself.
+  - if a source contains the mount point (e.g. syncing `/` or `/usr/local/bin`), the mount point is excluded automatically, so the share is never copied into itself. This exclude comes before the exclude list, so an include (`+ ...`) rule there cannot override it.
+  - stale glob matches are only removed for absolute patterns without `.`/`..` parts, never at the top level of the share (where the ZIP files are), and not at all if the pattern has no local match (e.g. an unmounted disk) – that case is reported as an error instead.
 
 > **Warning – exclude patterns:** in sync-only mode rsync copies the *contents* of each source folder separately. Therefore exclude patterns starting with `/` (anchored patterns) are relative to **the synced folder**, not to the filesystem root. For example, the pattern `/etc/alternatives/*` will not match when syncing `/etc`; you would need `alternatives/*` or `/alternatives/*` instead. Unanchored patterns (`*.log`, `*.key`, `.cache/`) behave the same in both modes.
 
@@ -186,7 +188,7 @@ This is a **mirror**: the share always holds the current state of the sources, u
 | MySQL backup | Supported | Not supported |
 | Compression | Yes (zip) | None |
 | Single path from the CLI | No | Yes: `--sync-only /path` |
-| Spaces in paths (source list) | Not supported | Supported |
+| Spaces in paths (source list) | Supported | Supported |
 | Anchored (`/...`) excludes | Relative to the filesystem root | Relative to the synced folder |
 | Missing source | rsync prints an error, backup continues | Error, exit code `1` at the end |
 | Cleaning up old backups | Manually / with a separate script | Not needed |
@@ -305,7 +307,7 @@ One absolute path per line (folder or file, glob patterns allowed):
 /usr/local/bin/*
 ```
 
-- In sync-only mode empty lines and lines starting with `#` are skipped; in ZIP mode avoid comments and paths containing spaces.
+- In both modes empty lines and lines starting with `#` are skipped, leading/trailing whitespace is trimmed, and paths containing spaces work.
 
 ### `excludeList.txt`
 
@@ -343,14 +345,14 @@ The installer:
 4. Writes `config.conf` from the `config.conf.example` template (comments are preserved), with `600` permissions.
    The values are written in single quotes (e.g. `SAMBA_PASSWORD='pa$$word'`), so passwords containing `$`, `"`, `` ` `` or `\` are stored unchanged.
 5. Tests the Samba connection.
-6. If they do not exist yet, creates `sourceList.txt` and `excludeList.txt` from the examples and opens them for editing.
+6. If they do not exist yet, creates the source and exclude lists at the paths given in step 3 (`SOURCE_DIRS_LIST`, `EXCLUDE_LIST`) from the examples and opens them for editing.
 7. Optionally adds a cron entry (daily / every 3rd day / weekly at 01:06, or a custom expression):
 
    ```
    06 01 */3 * * "/usr/local/bin/autoBackup/startBackup.sh" --config "/usr/local/bin/autoBackup/config.conf" >>/var/log/autoBackup.log 2>&1
    ```
 
-   The installer does not ask about the mode – if the cron run should be sync-only, set `SYNC_ONLY_DEFAULT="true"`, or add `--sync-only` to the cron line manually (`crontab -e`).
+   The cron line itself gets no mode flag, so the scheduled run follows `SYNC_ONLY_DEFAULT` (asked in step 3). To force a mode for the cron run only, add `--sync-only` or `--no-sync-only` to the line manually (`crontab -e`).
 
 The installer can be re-run at any time to change settings, or `config.conf` can be edited by hand.
 
