@@ -7,7 +7,7 @@
 #    so re-running it is an easy way to change the configuration
 # 3. Writes the config from config.conf.example, keeping its comments and order
 # 4. Tests the Samba connection
-# 5. Creates sourceList.txt and excludeList.txt from their examples
+# 5. Creates the source and exclude lists (at the configured paths) from their examples
 # 6. Optionally schedules the backup in crontab
 #########################################################
 
@@ -224,14 +224,14 @@ find_editor() {
 
 # Creates a list file from its .example and opens it for editing.
 # An existing list is never overwritten.
-#   $1: list file   $2: description shown to the user   $3: editor
+#   $1: list file   $2: example file   $3: description shown to the user   $4: editor
 create_list_file() {
-    local file="$1" description="$2" editor="$3"
-    local example="$file.example"
+    local file="$1" example="$2" description="$3" editor="$4"
 
     if [ -f "$file" ]; then
         echo "ℹ $file already exists, not overwritten"
     elif [ -f "$example" ]; then
+        mkdir -p "$(dirname "$file")"
         cp "$example" "$file"
         echo "✔ $file created from example"
         echo "📂 $description"
@@ -244,15 +244,18 @@ create_list_file() {
 
 create_source_and_exclude_lists() {
     echo ""
-    echo "Creating sourceList.txt and excludeList.txt from .example files..."
+    echo "Creating the source and exclude lists from .example files..."
 
+    # The paths entered at the prompts, so the files are where startBackup.sh reads them
     local dir="${config_values[PROGRAM_DIR]:-$SCRIPT_DIR}"
+    local source_list="${config_values[SOURCE_DIRS_LIST]:-$dir/sourceList.txt}"
+    local exclude_list="${config_values[EXCLUDE_LIST]:-$dir/excludeList.txt}"
     local editor
     editor="$(find_editor)"
 
-    create_list_file "$dir/sourceList.txt" \
+    create_list_file "$source_list" "$SCRIPT_DIR/sourceList.txt.example" \
         "Contains default configuration folders to back up (e.g. /etc, ~/.config)" "$editor"
-    create_list_file "$dir/excludeList.txt" \
+    create_list_file "$exclude_list" "$SCRIPT_DIR/excludeList.txt.example" \
         "Contains exclude rules (e.g. *.tmp, .cache/)" "$editor"
 }
 
